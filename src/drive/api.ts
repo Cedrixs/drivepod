@@ -137,7 +137,7 @@ export async function moveFile(fileId: string, fromParentId: string, toParentId:
 
 export async function getStreamUrl(fileId: string): Promise<string> {
   const token = await getAccessToken();
-  return `${BASE}/files/${fileId}?alt=media&token=${encodeURIComponent(token)}`;
+  return `${BASE}/files/${fileId}?alt=media&access_token=${encodeURIComponent(token)}`;
 }
 
 export async function getAuthenticatedStreamHeaders(): Promise<Record<string, string>> {
