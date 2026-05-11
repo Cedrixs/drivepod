@@ -1,4 +1,4 @@
-import { getStreamUrl, getAuthenticatedStreamHeaders } from '../drive/api';
+import { getStreamUrl } from '../drive/api';
 import { getOfflineAudioUrl } from '../offline/cache';
 import { saveStateWithSync, flushStateToDrive } from '../state/driveState';
 import { setupMediaSession, updateMediaSessionState, clearMediaSession } from './mediaSession';
