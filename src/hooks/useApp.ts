@@ -65,11 +65,26 @@ export function useApp(online: boolean): {
   const init = useCallback(async (): Promise<void> => {
     setState((s) => ({ ...s, loading: true, error: null }));
     try {
-      const callbackHandled = await handleOAuthCallback();
-      const authed = callbackHandled || await isAuthenticated();
+      const callbackResult = await handleOAuthCallback();
+      const authed = callbackResult.ok || await isAuthenticated();
 
       if (!authed) {
-        setState((s) => ({ ...s, authed: false, loading: false }));
+        // Surface a human-readable error if the OAuth callback had a specific failure
+        let authError: string | null = null;
+        if (!callbackResult.ok && callbackResult.error !== 'no_code') {
+          switch (callbackResult.error) {
+            case 'verifier_missing':
+              authError = 'Connexion interrompue (données PKCE perdues). Réessayez.';
+              break;
+            case 'state_mismatch':
+              authError = 'Erreur de sécurité OAuth (state mismatch). Réessayez.';
+              break;
+            case 'exchange_failed':
+              authError = `Échange de token échoué: ${callbackResult.detail ?? ''}. Vérifiez que l'URI de redirection est enregistrée dans Google Cloud Console.`;
+              break;
+          }
+        }
+        setState((s) => ({ ...s, authed: false, loading: false, error: authError }));
         return;
       }
 

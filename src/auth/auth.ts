@@ -7,6 +7,12 @@ const REVOKE_ENDPOINT = 'https://oauth2.googleapis.com/revoke';
 const SCOPE = 'https://www.googleapis.com/auth/drive';
 const ENC_KEY_STORAGE = 'dp_enc_key';
 
+// localStorage keys for PKCE — sessionStorage is unreliable on Android during OAuth redirects
+const PKCE_VERIFIER_KEY = 'dp_pkce_verifier';
+const PKCE_STATE_KEY = 'dp_oauth_state';
+const PKCE_EXPIRY_KEY = 'dp_pkce_expiry';
+const PKCE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
 function base64urlEncode(data: Uint8Array): string {
   return btoa(String.fromCharCode(...data))
     .replace(/\+/g, '-')
@@ -21,6 +27,29 @@ async function generatePKCE(): Promise<{ verifier: string; challenge: string }> 
   const digest = await crypto.subtle.digest('SHA-256', encoded);
   const challenge = base64urlEncode(new Uint8Array(digest));
   return { verifier, challenge };
+}
+
+function savePKCE(verifier: string, state: string): void {
+  localStorage.setItem(PKCE_VERIFIER_KEY, verifier);
+  localStorage.setItem(PKCE_STATE_KEY, state);
+  localStorage.setItem(PKCE_EXPIRY_KEY, String(Date.now() + PKCE_TTL_MS));
+}
+
+function loadPKCE(): { verifier: string; state: string } | null {
+  const verifier = localStorage.getItem(PKCE_VERIFIER_KEY);
+  const state = localStorage.getItem(PKCE_STATE_KEY);
+  const expiry = parseInt(localStorage.getItem(PKCE_EXPIRY_KEY) ?? '0', 10);
+  if (!verifier || !state || Date.now() > expiry) {
+    clearPKCE();
+    return null;
+  }
+  return { verifier, state };
+}
+
+function clearPKCE(): void {
+  localStorage.removeItem(PKCE_VERIFIER_KEY);
+  localStorage.removeItem(PKCE_STATE_KEY);
+  localStorage.removeItem(PKCE_EXPIRY_KEY);
 }
 
 async function getOrCreateEncKey(): Promise<CryptoKey> {
@@ -61,8 +90,7 @@ async function decryptToken(cipher: string): Promise<string> {
 export async function startLogin(): Promise<void> {
   const { verifier, challenge } = await generatePKCE();
   const state = base64urlEncode(crypto.getRandomValues(new Uint8Array(16)));
-  sessionStorage.setItem('pkce_verifier', verifier);
-  sessionStorage.setItem('oauth_state', state);
+  savePKCE(verifier, state);
 
   const params = new URLSearchParams({
     client_id: CLIENT_ID,
@@ -78,52 +106,63 @@ export async function startLogin(): Promise<void> {
   window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
 }
 
-export async function handleOAuthCallback(): Promise<boolean> {
+export type OAuthCallbackResult =
+  | { ok: true }
+  | { ok: false; error: 'no_code' | 'state_mismatch' | 'verifier_missing' | 'exchange_failed'; detail?: string };
+
+export async function handleOAuthCallback(): Promise<OAuthCallbackResult> {
   const url = new URL(window.location.href);
   const code = url.searchParams.get('code');
   const returnedState = url.searchParams.get('state');
-  const error = url.searchParams.get('error');
+  const errorParam = url.searchParams.get('error');
 
-  if (error) {
-    sessionStorage.removeItem('pkce_verifier');
-    sessionStorage.removeItem('oauth_state');
-    window.history.replaceState({}, '', `${window.location.pathname}`);
-    return false;
+  // Clean URL regardless of outcome so the code isn't processed twice
+  if (url.searchParams.has('code') || url.searchParams.has('error')) {
+    window.history.replaceState({}, '', window.location.pathname);
   }
 
-  if (!code) return false;
-
-  const verifier = sessionStorage.getItem('pkce_verifier');
-  const expectedState = sessionStorage.getItem('oauth_state');
-
-  if (!verifier || !expectedState || returnedState !== expectedState) {
-    sessionStorage.removeItem('pkce_verifier');
-    sessionStorage.removeItem('oauth_state');
-    window.history.replaceState({}, '', `${window.location.pathname}`);
-    return false;
+  if (errorParam) {
+    clearPKCE();
+    return { ok: false, error: 'no_code', detail: errorParam };
   }
 
-  sessionStorage.removeItem('pkce_verifier');
-  sessionStorage.removeItem('oauth_state');
-  window.history.replaceState({}, '', `${window.location.pathname}`);
+  if (!code) return { ok: false, error: 'no_code' };
+
+  const pkce = loadPKCE();
+  if (!pkce) {
+    return { ok: false, error: 'verifier_missing' };
+  }
+
+  if (returnedState !== pkce.state) {
+    clearPKCE();
+    return { ok: false, error: 'state_mismatch' };
+  }
+
+  clearPKCE();
 
   const body = new URLSearchParams({
     code,
     client_id: CLIENT_ID,
-    code_verifier: verifier,
+    code_verifier: pkce.verifier,
     grant_type: 'authorization_code',
     redirect_uri: REDIRECT_URI,
   });
 
-  const resp = await fetch(TOKEN_ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body.toString(),
-  });
+  let resp: Response;
+  try {
+    resp = await fetch(TOKEN_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+    });
+  } catch (err) {
+    return { ok: false, error: 'exchange_failed', detail: String(err) };
+  }
 
   if (!resp.ok) {
-    console.error('Token exchange failed', await resp.text());
-    return false;
+    const detail = await resp.text().catch(() => `HTTP ${resp.status}`);
+    console.error('Token exchange failed', resp.status, detail);
+    return { ok: false, error: 'exchange_failed', detail: `${resp.status}: ${detail}` };
   }
 
   const data = await resp.json() as {
@@ -140,7 +179,7 @@ export async function handleOAuthCallback(): Promise<boolean> {
     expiresAt: Date.now() + data.expires_in * 1000,
   }, 'main');
 
-  return true;
+  return { ok: true };
 }
 
 export async function getAccessToken(): Promise<string> {
@@ -225,6 +264,7 @@ export async function signOut(): Promise<void> {
   }
 
   localStorage.removeItem(ENC_KEY_STORAGE);
+  clearPKCE();
 
   if ('serviceWorker' in navigator) {
     const registrations = await navigator.serviceWorker.getRegistrations();

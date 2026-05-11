@@ -1,6 +1,10 @@
 import { startLogin } from '../auth/auth';
 
-export function AuthScreen(): React.JSX.Element {
+interface Props {
+  error?: string | null;
+}
+
+export function AuthScreen({ error }: Props): React.JSX.Element {
   return (
     <div className="min-h-screen bg-navy-900 flex flex-col items-center justify-center px-6 text-white">
       <div className="mb-8 flex flex-col items-center gap-4">
@@ -15,6 +19,12 @@ export function AuthScreen(): React.JSX.Element {
           Lecteur audio pour vos fichiers Google Drive
         </p>
       </div>
+
+      {error && (
+        <div className="mb-6 w-full max-w-sm bg-red-500/20 border border-red-500/50 rounded-xl p-4 text-sm text-red-300 text-center">
+          {error}
+        </div>
+      )}
 
       <button
         onClick={() => void startLogin()}

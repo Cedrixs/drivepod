@@ -85,7 +85,7 @@ export default function App(): React.JSX.Element {
   }
 
   if (!appState.authed) {
-    return <AuthScreen />;
+    return <AuthScreen error={appState.error} />;
   }
 
   const activeSource = appState.sources[appState.activeSourceIndex];
