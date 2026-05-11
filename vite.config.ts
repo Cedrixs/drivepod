@@ -52,13 +52,22 @@ export default defineConfig({
             handler: 'NetworkOnly',
           },
           {
-            urlPattern: /^https:\/\/www\.googleapis\.com\/drive\/.*/i,
+            // Drive API JSON calls only — exclude alt=media (audio streams)
+            // alt=media requests use <audio> with Range headers; NetworkFirst
+            // intercepts them without range support and breaks streaming.
+            urlPattern: /^https:\/\/www\.googleapis\.com\/drive\/(?!.*[?&]alt=media).*/i,
             handler: 'NetworkFirst',
             options: {
               cacheName: 'drive-api-cache',
               networkTimeoutSeconds: 10,
               expiration: { maxEntries: 50, maxAgeSeconds: 300 },
             },
+          },
+          {
+            // Audio streams: network-only so the browser handles redirects and
+            // range requests natively without SW interference.
+            urlPattern: /^https:\/\/www\.googleapis\.com\/drive\/.*[?&]alt=media/i,
+            handler: 'NetworkOnly',
           },
           {
             urlPattern: /^https:\/\/.*\.googleusercontent\.com\/.*/i,

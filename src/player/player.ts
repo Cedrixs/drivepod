@@ -1,4 +1,4 @@
-import { getStreamUrl } from '../drive/api';
+import { getStreamUrl, getAuthenticatedStreamHeaders } from '../drive/api';
 import { getOfflineAudioUrl } from '../offline/cache';
 import { saveStateWithSync, flushStateToDrive } from '../state/driveState';
 import { setupMediaSession, updateMediaSessionState, clearMediaSession } from './mediaSession';
@@ -105,8 +105,10 @@ class AudioPlayer {
     this.audio.addEventListener('playing', () => this.emit({ type: 'buffering', value: false }));
 
     this.audio.addEventListener('error', () => {
-      const msg = this.audio.error?.message ?? 'Playback error';
-      if (msg.includes('MEDIA_ERR_NETWORK') || msg.includes('MEDIA_ERR_DECODE')) {
+      const code = this.audio.error?.code ?? 0;
+      const msg = this.audio.error?.message || `Erreur lecture (code ${code})`;
+      console.error('[player] media error', code, msg, this.audio.src.slice(0, 100));
+      if (code === MediaError.MEDIA_ERR_NETWORK) {
         this.handleNetworkError();
       } else {
         this.emit({ type: 'error', message: msg });
@@ -124,11 +126,16 @@ class AudioPlayer {
 
   private handleNetworkError(): void {
     const savedPosition = this.audio.currentTime;
-    setTimeout(() => {
-      if (this.currentFile && !navigator.onLine) return;
-      this.audio.load();
-      this.audio.currentTime = savedPosition;
-      void this.audio.play().catch(() => { /* handled by user gesture */ });
+    const file = this.currentFile;
+    setTimeout(async () => {
+      if (!file || !navigator.onLine) return;
+      try {
+        const freshUrl = await getStreamUrl(file.id);
+        this.audio.src = freshUrl;
+        this.audio.load();
+        this.audio.currentTime = savedPosition;
+        await this.audio.play();
+      } catch { /* retry silently */ }
     }, 3_000);
   }
 
