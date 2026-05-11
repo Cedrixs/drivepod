@@ -90,10 +90,18 @@ export function useApp(online: boolean): {
 
       setState((s) => ({ ...s, authed: true }));
 
+      const token = await getAccessToken();
       const rootResp = await fetch('https://www.googleapis.com/drive/v3/files/root?fields=id', {
-        headers: { Authorization: `Bearer ${await getAccessToken()}` },
+        headers: { Authorization: `Bearer ${token}` },
       });
+      if (!rootResp.ok) {
+        if (rootResp.status === 403) {
+          throw new Error('API_NOT_ENABLED');
+        }
+        throw new Error(`Drive root fetch failed: ${rootResp.status}`);
+      }
       const rootData = await rootResp.json() as { id: string };
+      if (!rootData.id) throw new Error('API_NOT_ENABLED');
       const audioFolderId = await findOrCreateFolder(AUDIO_FOLDER_NAME, rootData.id);
 
       audioFolderIdRef.current = audioFolderId;
@@ -123,6 +131,12 @@ export function useApp(online: boolean): {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg === 'NOT_AUTHENTICATED' || msg === 'REFRESH_FAILED') {
         setState((s) => ({ ...s, authed: false, loading: false }));
+      } else if (msg === 'API_NOT_ENABLED') {
+        setState((s) => ({
+          ...s,
+          loading: false,
+          error: "Google Drive API non activée. Allez dans Google Cloud Console → APIs & Services → Library → activez « Google Drive API ».",
+        }));
       } else {
         setState((s) => ({ ...s, error: msg, loading: false }));
       }
