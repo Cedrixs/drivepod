@@ -1,6 +1,7 @@
 import { getDB } from '../state/db';
 
 const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? '295398590056-07is9k0cbqt85hjv004doc4klocmchff.apps.googleusercontent.com';
+const CLIENT_SECRET = import.meta.env.VITE_GOOGLE_CLIENT_SECRET ?? '';
 const REDIRECT_URI = `${window.location.origin}/drivepod/`;
 const TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
 const REVOKE_ENDPOINT = 'https://oauth2.googleapis.com/revoke';
@@ -140,13 +141,15 @@ export async function handleOAuthCallback(): Promise<OAuthCallbackResult> {
 
   clearPKCE();
 
-  const body = new URLSearchParams({
+  const tokenParams: Record<string, string> = {
     code,
     client_id: CLIENT_ID,
     code_verifier: pkce.verifier,
     grant_type: 'authorization_code',
     redirect_uri: REDIRECT_URI,
-  });
+  };
+  if (CLIENT_SECRET) tokenParams['client_secret'] = CLIENT_SECRET;
+  const body = new URLSearchParams(tokenParams);
 
   let resp: Response;
   try {

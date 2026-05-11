@@ -43,6 +43,7 @@ jobs:
         run: npm run build
         env:
           VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID || '295398590056-07is9k0cbqt85hjv004doc4klocmchff.apps.googleusercontent.com' }}
+          VITE_GOOGLE_CLIENT_SECRET: ${{ secrets.VITE_GOOGLE_CLIENT_SECRET }}
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
