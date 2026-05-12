@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DrivePod — Diagnostic Audio</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: monospace; max-width: 820px; margin: 24px auto; padding: 0 16px;
+           background: #0d0d1a; color: #e0e0e0; }
+    h1 { color: #7b9fff; }
+    .section { background: #12122a; border: 1px solid #2a2a5a; border-radius: 8px;
+               padding: 14px 16px; margin: 12px 0; }
+    .section h3 { margin: 0 0 10px; color: #a0b4ff; font-size: 14px; }
+    .ok   { color: #4caf50; }
+    .err  { color: #f44336; }
+    .warn { color: #ffb300; }
+    .info { color: #90caf9; }
+    .line { padding: 2px 0; font-size: 13px; word-break: break-all; }
+    button { background: #2a3a8a; color: #fff; border: none; padding: 10px 22px;
+             border-radius: 6px; cursor: pointer; font-size: 14px; margin: 4px 4px 16px 0; }
+    button:hover { background: #3b52c4; }
+    audio { width: 100%; margin: 8px 0; border-radius: 4px; }
+    #status { color: #ffb300; font-size: 13px; }
+  </style>
+</head>
+<body>
+<h1>🔊 DrivePod — Diagnostic Audio</h1>
+<p style="color:#aaa;font-size:13px">
+  Ce fichier teste directement l'accès au token, l'API Drive et la lecture audio —
+  sans React, sans lecteur, pour isoler le problème.
+</p>
+<button onclick="runTests()">▶ Lancer les tests</button>
+<span id="status"></span>
+<div id="log"></div>
+
+<script>
+const logEl = document.getElementById('log');
+const statusEl = document.getElementById('status');
+
+function sec(title) {
+  const d = document.createElement('div');
+  d.className = 'section';
+  d.innerHTML = `<h3>${title}</h3>`;
+  logEl.appendChild(d);
+  return d;
+}
+
+function ln(container, text, cls = 'info') {
+  const d = document.createElement('div');
+  d.className = `line ${cls}`;
+  d.textContent = text;
+  container.appendChild(d);
+}
+
+function status(msg) { statusEl.textContent = msg; }
+
+// ─── Read raw IndexedDB (no idb lib) ───────────────────────────────────────
+function idbGet(dbName, storeName, key) {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(dbName);
+    req.onerror = () => reject(new Error('Cannot open IndexedDB: ' + req.error));
+    req.onsuccess = e => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(storeName)) {
+        db.close();
+        return resolve(null);
+      }
+      const tx = db.transaction(storeName, 'readonly');
+      const g = tx.objectStore(storeName).get(key);
+      g.onsuccess = () => { db.close(); resolve(g.result ?? null); };
+      g.onerror = () => { db.close(); reject(g.error); };
+    };
+  });
+}
+
+async function runTests() {
+  logEl.innerHTML = '';
+  status('Running…');
+  let token = null;
+  let testFileId = null;
+  let testFileName = null;
+  let blobUrl = null;
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TEST 1 — Token in IndexedDB
+  // ═══════════════════════════════════════════════════════════════════════════
+  {
+    const s = sec('Test 1 — Token IndexedDB (store: tokens, key: main)');
+    try {
+      const stored = await idbGet('drivepod', 'tokens', 'main');
+      if (!stored) {
+        ln(s, '✗ ÉCHEC : aucun token trouvé (non connecté ?)', 'err');
+        status('Test 1 failed'); return;
+      }
+      token = stored.accessToken;
+      const exp = stored.expiresAt;
+      const isExpired = Date.now() > exp;
+      ln(s, `✓ Token trouvé (longueur: ${token.length})`, 'ok');
+      ln(s, `Token début: ${token.substring(0, 30)}...`);
+      if (isExpired) {
+        ln(s, `⚠ Token EXPIRÉ depuis ${new Date(exp).toLocaleTimeString()} — le refresh devrait l'avoir renouvelé`, 'warn');
+      } else {
+        ln(s, `✓ Token valide jusqu'à ${new Date(exp).toLocaleTimeString()}`, 'ok');
+      }
+    } catch (e) {
+      ln(s, `✗ ERREUR: ${e}`, 'err'); status('Test 1 error'); return;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TEST 2 — Token dans le cache SW (dp-sw-tokens)
+  // ═══════════════════════════════════════════════════════════════════════════
+  {
+    const s = sec('Test 2 — Token dans le cache SW (dp-sw-tokens → /sw-token)');
+    try {
+      const cache = await caches.open('dp-sw-tokens');
+      const r = await cache.match('/sw-token');
+      if (!r) {
+        ln(s, '✗ ABSENT — le SW ne peut pas s\'authentifier !', 'err');
+        ln(s, 'Cause : getAccessToken() n\'a pas encore été appelé avec le nouveau code', 'warn');
+        ln(s, 'Action : déconnectez-vous et reconnectez-vous, ou rechargez l\'app', 'warn');
+      } else {
+        const d = await r.json();
+        ln(s, `✓ Token SW présent: ${String(d.token).substring(0, 30)}...`, 'ok');
+        const match = d.token === token;
+        ln(s, match ? '✓ Identique au token IndexedDB' : '⚠ Différent du token IndexedDB', match ? 'ok' : 'warn');
+      }
+    } catch (e) {
+      ln(s, `✗ ERREUR: ${e}`, 'err');
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TEST 3 — Drive API : lister les fichiers audio
+  // ═══════════════════════════════════════════════════════════════════════════
+  {
+    const s = sec('Test 3 — Drive API list (Authorization: Bearer header)');
+    try {
+      const url = 'https://www.googleapis.com/drive/v3/files'
+        + '?q=mimeType%3D%27audio%2Fmpeg%27+and+trashed%3Dfalse'
+        + '&fields=files(id%2Cname%2Csize)&pageSize=3&orderBy=createdTime';
+      ln(s, `GET ${url.substring(0, 80)}…`);
+      const resp = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      ln(s, `HTTP ${resp.status} ${resp.statusText}`, resp.ok ? 'ok' : 'err');
+      if (resp.ok) {
+        const data = await resp.json();
+        const files = data.files ?? [];
+        ln(s, `✓ ${files.length} fichier(s) trouvé(s)`, files.length > 0 ? 'ok' : 'warn');
+        files.forEach((f, i) => {
+          ln(s, `  [${i}] "${f.name}" — id: ${f.id} — ${(f.size / 1024).toFixed(0)} KB`);
+          if (i === 0) { testFileId = f.id; testFileName = f.name; }
+        });
+      } else {
+        const body = await resp.text();
+        ln(s, `Corps: ${body}`, 'err');
+      }
+    } catch (e) {
+      ln(s, `✗ ERREUR: ${e}`, 'err');
+    }
+  }
+
+  if (!testFileId) {
+    sec('⚠ Aucun fichier trouvé — tests audio ignorés');
+    status('Aucun fichier audio'); return;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TEST 4 — Fetch direct avec Authorization header → Blob URL
+  // ═══════════════════════════════════════════════════════════════════════════
+  {
+    const s = sec(`Test 4 — Fetch direct "${testFileName}" → Blob URL`);
+    try {
+      const url = `https://www.googleapis.com/drive/v3/files/${testFileId}?alt=media`;
+      ln(s, `Téléchargement depuis ${url}`);
+      ln(s, '(Peut prendre quelques secondes…)', 'warn');
+      const resp = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      ln(s, `HTTP ${resp.status} ${resp.statusText}`, resp.ok ? 'ok' : 'err');
+      ln(s, `Content-Type: ${resp.headers.get('Content-Type') ?? '?'}`);
+      ln(s, `Content-Length: ${resp.headers.get('Content-Length') ?? '?'}`);
+
+      if (resp.ok) {
+        const blob = await resp.blob();
+        blobUrl = URL.createObjectURL(blob);
+        ln(s, `✓ Blob: ${(blob.size / 1024).toFixed(0)} KB, type: ${blob.type}`, 'ok');
+
+        const audio = document.createElement('audio');
+        audio.controls = true;
+        audio.src = blobUrl;
+        s.appendChild(audio);
+
+        await new Promise(res => {
+          audio.addEventListener('loadedmetadata', () => {
+            ln(s, `✓ Durée: ${audio.duration.toFixed(1)}s — LECTURE DISPONIBLE`, 'ok');
+            res();
+          }, { once: true });
+          audio.addEventListener('error', () => {
+            ln(s, `✗ Erreur audio: code=${audio.error?.code} msg=${audio.error?.message}`, 'err');
+            res();
+          }, { once: true });
+          setTimeout(res, 8000);
+        });
+      } else {
+        const body = await resp.text();
+        ln(s, `Corps: ${body}`, 'err');
+      }
+    } catch (e) {
+      ln(s, `✗ ERREUR: ${e}`, 'err');
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TEST 5 — SW Proxy /drivepod/stream/:id
+  // ═══════════════════════════════════════════════════════════════════════════
+  {
+    const s = sec(`Test 5 — Service Worker proxy /drivepod/stream/${testFileId}`);
+    try {
+      const proxyUrl = `/drivepod/stream/${testFileId}`;
+      ln(s, `GET ${proxyUrl} avec Range: bytes=0-65535`);
+      const resp = await fetch(proxyUrl, {
+        headers: { Range: 'bytes=0-65535' }
+      });
+      ln(s, `HTTP ${resp.status} ${resp.statusText}`, (resp.ok || resp.status === 206) ? 'ok' : 'err');
+      ln(s, `Content-Type: ${resp.headers.get('Content-Type') ?? '?'}`);
+      ln(s, `Content-Range: ${resp.headers.get('Content-Range') ?? 'absent'}`);
+
+      if (resp.ok || resp.status === 206) {
+        ln(s, '✓ SW proxy fonctionne !', 'ok');
+        const audio2 = document.createElement('audio');
+        audio2.controls = true;
+        audio2.src = proxyUrl;
+        s.appendChild(audio2);
+        ln(s, '↑ Contrôles lecture via proxy SW', 'ok');
+      } else if (resp.status === 401) {
+        ln(s, '✗ 401 — SW n\'a pas de token (voir Test 2)', 'err');
+      } else {
+        const body = await resp.text();
+        ln(s, `Corps: ${body.substring(0, 300)}`, 'err');
+      }
+    } catch (e) {
+      ln(s, `✗ ERREUR: ${e}`, 'err');
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TEST 6 — SW enregistré ?
+  // ═══════════════════════════════════════════════════════════════════════════
+  {
+    const s = sec('Test 6 — État du Service Worker');
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      if (regs.length === 0) {
+        ln(s, '✗ Aucun SW enregistré', 'err');
+      } else {
+        regs.forEach(r => {
+          ln(s, `✓ SW scope: ${r.scope}`, 'ok');
+          ln(s, `  active: ${r.active?.scriptURL ?? 'none'}`);
+          ln(s, `  waiting: ${r.waiting?.scriptURL ?? 'none'}`);
+          ln(s, `  installing: ${r.installing?.scriptURL ?? 'none'}`);
+        });
+      }
+    } else {
+      ln(s, '✗ Service Workers non supportés', 'err');
+    }
+  }
+
+  status('Tests terminés');
+}
+</script>
+</body>
+</html>
