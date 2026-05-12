@@ -37,22 +37,24 @@ Audio/
    - Name: `DrivePod Web`
    - Authorized JavaScript origins: `https://Cedrixs.github.io`
    - Authorized redirect URIs: `https://Cedrixs.github.io/drivepod/`
-5. Copiez le **Client ID** (format: `xxxxx.apps.googleusercontent.com`)
+5. Copiez le **Client ID** et le **Client Secret** (visibles dans les détails du credential)
 6. **OAuth consent screen** → configurez votre app (nom, email, scopes: `../auth/drive`)
 
-### 2. Mettre à jour le Client ID
+> **Pourquoi un Client Secret ?**  
+> Les clients OAuth de type "Web application" dans Google Cloud **requièrent** le `client_secret` lors de l'échange du code d'autorisation. Le PKCE seul ne suffit pas pour ce type de client. Le secret n'est pas dans le code source — il transite uniquement via les secrets GitHub Actions au moment du build.
 
-**Option A — Variable d'environnement (recommandée) :**
-```bash
-# Dans GitHub → Settings → Variables → New repository variable
-Name:  VITE_GOOGLE_CLIENT_ID
-Value: votre-client-id.apps.googleusercontent.com
+### 2. Variables et secrets GitHub
+
+Dans **GitHub → Settings → Secrets and variables → Actions** :
+
+**Variables** (non sensibles) :
+```
+VITE_GOOGLE_CLIENT_ID = votre-client-id.apps.googleusercontent.com
 ```
 
-**Option B — Directement dans le code :**
-Éditez `src/auth/auth.ts`, ligne avec `CLIENT_ID`:
-```typescript
-const CLIENT_ID = 'VOTRE_NOUVEAU_CLIENT_ID.apps.googleusercontent.com';
+**Secrets** (sensibles) :
+```
+VITE_GOOGLE_CLIENT_SECRET = votre-client-secret
 ```
 
 ---
@@ -81,9 +83,53 @@ npm run build      # Build de production
 npm run test       # Tests unitaires
 npm run lint       # Linting ESLint
 npx tsc --noEmit   # Vérification TypeScript stricte
+```
 
-# Lighthouse PWA score (après déploiement)
-npx lighthouse https://Cedrixs.github.io/drivepod/ --only-categories=pwa --output=html
+---
+
+## Architecture technique
+
+### Streaming audio — proxy Service Worker
+
+La lecture audio utilise un proxy dans le Service Worker pour contourner la limitation des balises `<audio>` (impossibilité de définir des en-têtes HTTP) :
+
+```
+<audio src="/drivepod/stream/:fileId">
+       ↓
+  Service Worker intercepts /drivepod/stream/:id
+       ↓
+  fetch googleapis.com/drive/v3/files/:id?alt=media
+       + Authorization: Bearer TOKEN
+       + Range: bytes=... (forwarded for seeking)
+       ↓
+  Google Drive → réponse streamée
+```
+
+Le token OAuth est stocké dans le Cache API (`dp-sw-tokens`) par le code de la page à chaque acquisition ou renouvellement. Le SW lit ce cache — il n'a pas accès à l'IndexedDB encrypté.
+
+### Service Worker (injectManifest)
+
+Le SW est un fichier TypeScript custom (`src/sw.ts`) compilé via vite-plugin-pwa en mode `injectManifest`. Il gère :
+- **Précache Workbox** : tous les assets JS/CSS/HTML sont mis en cache à l'installation
+- **Proxy audio** : `/drivepod/stream/:id` → Drive API authentifié
+- **Drive API** : NetworkFirst avec cache 5 min pour les listes de fichiers
+- **OAuth endpoints** : NetworkOnly (jamais mis en cache)
+- **Navigation SPA** : fallback vers `index.html` précaché
+
+### Authentification (PKCE + client_secret)
+
+```
+startLogin()
+  → génère code_verifier + code_challenge (PKCE S256)
+  → stocke verifier dans localStorage (TTL 10 min)
+    (sessionStorage effacé par Android lors du redirect OAuth)
+  → redirect vers accounts.google.com
+
+handleOAuthCallback()
+  → vérifie state + code_verifier
+  → POST /token avec code + code_verifier + client_secret
+  → stocke access_token (plain) + refresh_token (AES-256-GCM) en IndexedDB
+  → écrit access_token dans Cache API pour le SW
 ```
 
 ---
@@ -101,75 +147,70 @@ npx lighthouse https://Cedrixs.github.io/drivepod/ --only-categories=pwa --outpu
    - Play/Pause doit fonctionner
    - Track précédent/suivant doit fonctionner
 5. Verrouillez l'écran → les mêmes contrôles doivent apparaître sur l'écran de verrouillage
-6. Testez les boutons physiques de vos écouteurs Bluetooth :
-   - Double-tap → play/pause
-   - Triple-tap → piste suivante (selon le modèle)
+6. Testez les boutons physiques de vos écouteurs Bluetooth
 
 **Résultat attendu :** titre visible sur l'écran de verrouillage, contrôles fonctionnels.
 
 ### TC-5 : Reprise multi-device
 
-**Prérequis :** deux appareils (ex: PC + téléphone Android) connectés au même compte Google.
+**Prérequis :** deux appareils connectés au même compte Google.
 
-1. **Sur l'appareil A** : ouvrez l'app, lancez un fichier, écoutez pendant ~2 minutes
+1. **Sur l'appareil A** : lancez un fichier, écoutez ~2 minutes
 2. **Sur l'appareil A** : mettez en pause → attendez 35 secondes (flush vers Drive)
-3. **Sur l'appareil B** : ouvrez l'app, connectez-vous avec le même compte Google
-4. **Sur l'appareil B** : cliquez sur le même fichier
+3. **Sur l'appareil B** : ouvrez l'app, cliquez sur le même fichier
 
-**Résultat attendu :** la lecture reprend à ±10 secondes de l'endroit où vous vous étiez arrêté sur A.
-
-*Note : le sync vers Drive est debouncé à 30s. Si vous passez à l'appareil B moins de 30s après avoir mis en pause sur A, utilisez le bouton "Resynchroniser depuis Drive" dans Réglages.*
+**Résultat attendu :** la lecture reprend à ±10 secondes de l'endroit où vous vous étiez arrêté.
 
 ---
 
 ## Troubleshooting
 
+### L'audio ne se lance pas après mise à jour du SW
+
+**Symptôme :** lecture bloquée à 0:00 après une mise à jour de l'app.
+
+**Cause :** l'ancien Service Worker est encore actif. Le nouveau SW avec le proxy audio n'est pas encore installé.
+
+**Solution :**
+1. DevTools → Application → Service Workers → **Unregister**
+2. Rechargez la page (le nouveau SW s'installe et recharge automatiquement)
+
+Ou plus simplement : attendez quelques minutes, l'app se rechargera automatiquement via `onNeedRefresh`.
+
+### "Échange de token échoué : 400 client_secret is missing"
+
+**Cause :** le secret OAuth n'est pas configuré dans GitHub Actions.
+
+**Solution :** ajoutez `VITE_GOOGLE_CLIENT_SECRET` dans **GitHub → Settings → Secrets → Actions** (valeur dans Google Cloud Console → Credentials → votre client OAuth → Client Secret).
+
+### "findOrCreateFolder list failed: 403"
+
+**Cause :** l'API Google Drive n'est pas activée dans Google Cloud Console.
+
+**Solution :** Google Cloud Console → APIs & Services → Library → cherchez "Google Drive API" → **Activer**.
+
 ### Token expiré / "Se connecter à Google Drive" réapparaît
 
-**Symptôme :** vous êtes renvoyé à l'écran de connexion sans raison.
-
 **Causes possibles :**
-1. Refresh token révoqué (durée maximale 6 mois d'inactivité pour les apps en mode test)
-2. Vous avez révoqué les permissions depuis [myaccount.google.com/permissions](https://myaccount.google.com/permissions)
-3. Le stockage du navigateur a été effacé
+1. Refresh token révoqué (max 6 mois d'inactivité pour les apps en mode test)
+2. Permissions révoquées depuis [myaccount.google.com/permissions](https://myaccount.google.com/permissions)
+3. Stockage navigateur effacé
 
-**Solution :** reconnectez-vous normalement. Toutes vos positions sont sauvées sur Drive (`_drivepod_state.json`) et seront restaurées.
-
-**Forcer la reconnexion propre :**
-```
-Réglages → Se déconnecter → reconnectez-vous
-```
+**Solution :** reconnectez-vous. Les positions de lecture sont sauvées sur Drive (`_drivepod_state.json`) et seront restaurées.
 
 ### Un fichier ne s'archive pas
 
-**Symptôme :** le fichier reste dans la liste après 95% ou après "Archiver".
-
 **Causes :**
-1. **Hors-ligne :** l'archivage est mis en queue et s'exécutera au retour online. Le bandeau "Mode hors-ligne — N actions en attente" l'indique.
-2. **Quota Drive atteint :** vérifiez votre quota sur [drive.google.com/settings/storage](https://drive.google.com/settings/storage)
-3. **Permissions insuffisantes :** revérifiez que le scope `drive` est accordé dans [myaccount.google.com/permissions](https://myaccount.google.com/permissions)
-4. **Le fichier est déjà archivé** depuis un autre appareil → l'app traite le 404 comme un succès et retire l'entrée.
+1. **Hors-ligne :** l'archivage est mis en queue et s'exécutera au retour online
+2. **Quota Drive atteint :** vérifiez sur [drive.google.com/settings/storage](https://drive.google.com/settings/storage)
+3. **Déjà archivé** depuis un autre appareil → le 404 est traité comme un succès
 
-**Solution rapide :** ouvrez les DevTools → Application → IndexedDB → `drivepod` → `offlineQueue` pour voir les actions en attente.
-
-### La lecture s'arrête en arrière-plan / écran éteint
-
-**Symptôme :** audio coupe quand l'écran s'éteint sur Android.
+### La lecture s'arrête en arrière-plan sur Android
 
 **Solution :**
-1. Assurez-vous que DrivePod est installé comme PWA (bouton "Ajouter à l'écran d'accueil" dans Chrome)
-2. Ouvrez **Paramètres Android → Applications → Chrome → Batterie** → sélectionnez "Non restreint"
-3. Désactivez l'optimisation de batterie pour Chrome
-4. Sur certains Android (Xiaomi, Huawei) : désactivez le nettoyage automatique pour Chrome dans les paramètres système
-
-### Quota Drive atteint (erreur 403)
-
-**Symptôme :** impossible de lire ou d'archiver, erreur dans la console.
-
-**Solutions :**
-1. Videz le dossier `Audio/Archive/` des fichiers anciens
-2. Ou libérez de l'espace Drive depuis [drive.google.com](https://drive.google.com)
-3. L'app gère automatiquement le backoff exponentiel sur les rate limits (1000 req/100s/user)
+1. Installez DrivePod comme PWA (bouton "Ajouter à l'écran d'accueil")
+2. **Paramètres Android → Applications → Chrome → Batterie** → "Non restreint"
+3. Sur Xiaomi/Huawei : désactivez le nettoyage automatique pour Chrome
 
 ---
 
@@ -187,17 +228,18 @@ npm test
 - TC-7 : Archive manuelle → passe au suivant
 - TC-8 : Expiration de token
 
-**Tests manuels requis (nécessitent hardware Android) :**
-- TC-1 : Connexion OAuth from scratch → voir section "Tests manuels"
-- TC-4 : Commandes Bluetooth → voir section "Tests manuels"
+**Tests manuels requis (nécessitent hardware) :**
+- TC-1 : Connexion OAuth from scratch
+- TC-4 : Commandes Bluetooth
 
 ---
 
 ## Sécurité
 
-- **OAuth 2.0 PKCE** : aucun secret client dans le code
+- **OAuth 2.0 PKCE** : le `code_verifier` n'est jamais envoyé sans correspondance `state`
+- **Client secret** : injecté au build, jamais dans le repo (GitHub Secret)
 - **Refresh token chiffré** (AES-256-GCM via Web Crypto API) en IndexedDB
-- **CSP stricte** : `connect-src` limité aux domaines Google
+- **Token SW** : access token en clair dans le Cache API (même origine, accès limité au SW)
 - **Aucune donnée** envoyée à des serveurs tiers (lecture directe depuis Drive)
 
 ---
@@ -209,10 +251,11 @@ npm test
 | Framework | React 18 + TypeScript strict |
 | Build | Vite 5 |
 | Style | Tailwind CSS 3 |
-| Auth | OAuth 2.0 PKCE (manuel, sans SDK) |
+| Auth | OAuth 2.0 PKCE + client_secret (Web Application) |
 | Drive API | REST v3 (fetch natif) |
 | Stockage local | IndexedDB via `idb` |
-| PWA / SW | `vite-plugin-pwa` + Workbox |
+| PWA / SW | `vite-plugin-pwa` (injectManifest) + Workbox 7 |
+| Audio streaming | SW auth proxy → Drive API |
 | Player | `<audio>` HTML5 + Media Session API |
 | CI/CD | GitHub Actions → GitHub Pages |
 
