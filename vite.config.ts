@@ -70,17 +70,12 @@ export default defineConfig({
             handler: 'NetworkOnly',
           },
           {
+            // googleusercontent.com serves the actual audio bytes after Drive
+            // redirects. NetworkOnly lets the browser handle redirects and Range
+            // requests natively. Offline audio is served via blob URLs from
+            // the explicit drivepod-audio cache (downloadFileToCache), not here.
             urlPattern: /^https:\/\/.*\.googleusercontent\.com\/.*/i,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'audio-cache',
-              expiration: {
-                maxEntries: 50,
-                maxAgeSeconds: 60 * 60 * 24 * 7,
-              },
-              cacheableResponse: { statuses: [0, 200, 206] },
-              rangeRequests: true,
-            },
+            handler: 'NetworkOnly',
           },
         ],
       },
