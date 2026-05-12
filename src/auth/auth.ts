@@ -1,5 +1,14 @@
 import { getDB } from '../state/db';
 
+async function storeTokenForSW(token: string): Promise<void> {
+  try {
+    const cache = await caches.open('dp-sw-tokens');
+    await cache.put('/sw-token', new Response(JSON.stringify({ token }), {
+      headers: { 'Content-Type': 'application/json' },
+    }));
+  } catch { /* non-critical */ }
+}
+
 const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? '295398590056-07is9k0cbqt85hjv004doc4klocmchff.apps.googleusercontent.com';
 const CLIENT_SECRET = import.meta.env.VITE_GOOGLE_CLIENT_SECRET ?? '';
 const REDIRECT_URI = `${window.location.origin}/drivepod/`;
@@ -182,6 +191,7 @@ export async function handleOAuthCallback(): Promise<OAuthCallbackResult> {
     expiresAt: Date.now() + data.expires_in * 1000,
   }, 'main');
 
+  await storeTokenForSW(data.access_token);
   return { ok: true };
 }
 
@@ -196,6 +206,7 @@ export async function getAccessToken(): Promise<string> {
   if (!stored) throw new Error('NOT_AUTHENTICATED');
 
   if (Date.now() < stored.expiresAt - 60_000) {
+    void storeTokenForSW(stored.accessToken);
     return stored.accessToken;
   }
 
@@ -229,6 +240,7 @@ export async function getAccessToken(): Promise<string> {
     expiresAt: Date.now() + data.expires_in * 1000,
   }, 'main');
 
+  await storeTokenForSW(data.access_token);
   return data.access_token;
 }
 

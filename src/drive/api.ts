@@ -135,9 +135,10 @@ export async function moveFile(fileId: string, fromParentId: string, toParentId:
   }
 }
 
-export async function getStreamUrl(fileId: string): Promise<string> {
-  const token = await getAccessToken();
-  return `${BASE}/files/${fileId}?alt=media&access_token=${encodeURIComponent(token)}`;
+export function getStreamUrl(fileId: string): Promise<string> {
+  // Requests to /drivepod/stream/:id are intercepted by the service worker,
+  // which injects the Authorization header before forwarding to Drive API.
+  return Promise.resolve(`/drivepod/stream/${fileId}`);
 }
 
 export async function getAuthenticatedStreamHeaders(): Promise<Record<string, string>> {

@@ -7,7 +7,13 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.ts',
       registerType: 'autoUpdate',
+      injectManifest: {
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
+      },
       includeAssets: ['icons/*.svg', 'icons/*.png', 'favicon.ico'],
       manifest: {
         name: 'DrivePod',
@@ -35,47 +41,6 @@ export default defineConfig({
             sizes: '512x512',
             type: 'image/png',
             purpose: 'maskable',
-          },
-        ],
-      },
-      workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
-        navigateFallback: '/drivepod/index.html',
-        navigateFallbackDenylist: [/^\/api/, /\?code=/],
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/accounts\.google\.com\/.*/i,
-            handler: 'NetworkOnly',
-          },
-          {
-            urlPattern: /^https:\/\/oauth2\.googleapis\.com\/.*/i,
-            handler: 'NetworkOnly',
-          },
-          {
-            // Drive API JSON calls only — exclude alt=media (audio streams)
-            // alt=media requests use <audio> with Range headers; NetworkFirst
-            // intercepts them without range support and breaks streaming.
-            urlPattern: /^https:\/\/www\.googleapis\.com\/drive\/(?!.*[?&]alt=media).*/i,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'drive-api-cache',
-              networkTimeoutSeconds: 10,
-              expiration: { maxEntries: 50, maxAgeSeconds: 300 },
-            },
-          },
-          {
-            // Audio streams: network-only so the browser handles redirects and
-            // range requests natively without SW interference.
-            urlPattern: /^https:\/\/www\.googleapis\.com\/drive\/.*[?&]alt=media/i,
-            handler: 'NetworkOnly',
-          },
-          {
-            // googleusercontent.com serves the actual audio bytes after Drive
-            // redirects. NetworkOnly lets the browser handle redirects and Range
-            // requests natively. Offline audio is served via blob URLs from
-            // the explicit drivepod-audio cache (downloadFileToCache), not here.
-            urlPattern: /^https:\/\/.*\.googleusercontent\.com\/.*/i,
-            handler: 'NetworkOnly',
           },
         ],
       },
