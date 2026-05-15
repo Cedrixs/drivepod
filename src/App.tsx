@@ -9,8 +9,9 @@ import { PlayerBar } from './ui/PlayerBar';
 import { PlayerFull } from './ui/PlayerFull';
 import { Settings } from './ui/Settings';
 import { OfflineBanner } from './ui/OfflineBanner';
-import { SettingsIcon, RefreshIcon, SearchIcon } from './ui/icons';
+import { SettingsIcon, RefreshIcon, SearchIcon, SunIcon, MoonIcon } from './ui/icons';
 import { Dashboard } from './ui/Dashboard';
+import { useTheme } from './hooks/useTheme';
 import { useApp } from './hooks/useApp';
 import { usePlayer } from './hooks/usePlayer';
 import { useOnline } from './hooks/useOnline';
@@ -21,6 +22,7 @@ import type { DriveFile } from './drive/types';
 
 export default function App(): React.JSX.Element {
   const online = useOnline();
+  const { theme, toggleTheme } = useTheme();
   const [playerOpen, setPlayerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [queueTabActive, setQueueTabActive] = useState(false);
@@ -159,6 +161,13 @@ export default function App(): React.JSX.Element {
             title="Rechercher"
           >
             <SearchIcon size={20} />
+          </button>
+          <button
+            onClick={toggleTheme}
+            className="p-2 text-white/60 hover:text-white transition-colors"
+            title={theme === 'dark' ? 'Thème clair' : 'Thème sombre'}
+          >
+            {theme === 'dark' ? <SunIcon size={20} /> : <MoonIcon size={20} />}
           </button>
           <button
             onClick={() => void refresh()}

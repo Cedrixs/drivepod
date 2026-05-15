@@ -60,6 +60,12 @@ export function SearchIcon(p: IconProps): React.JSX.Element {
 export function ListPlusIcon(p: IconProps): React.JSX.Element {
   return <Icon {...p}><line x1="3" y1="6" x2="15" y2="6" /><line x1="3" y1="12" x2="15" y2="12" /><line x1="3" y1="18" x2="9" y2="18" /><line x1="18" y1="14" x2="18" y2="22" /><line x1="14" y1="18" x2="22" y2="18" /></Icon>;
 }
+export function SunIcon(p: IconProps): React.JSX.Element {
+  return <Icon {...p}><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></Icon>;
+}
+export function MoonIcon(p: IconProps): React.JSX.Element {
+  return <Icon {...p}><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></Icon>;
+}
 export function GripVerticalIcon(p: IconProps): React.JSX.Element {
   return <Icon {...p}><circle cx="9" cy="6" r="1" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="9" cy="18" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="6" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="18" r="1" fill="currentColor" stroke="none"/></Icon>;
 }
