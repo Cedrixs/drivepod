@@ -4,6 +4,7 @@ import { SourceTabs } from './ui/SourceTabs';
 import { FileList } from './ui/FileList';
 import { QueueList } from './ui/QueueList';
 import { SearchBar } from './ui/SearchBar';
+import { CapturesList } from './ui/CapturesList';
 import { PlayerBar } from './ui/PlayerBar';
 import { PlayerFull } from './ui/PlayerFull';
 import { Settings } from './ui/Settings';
@@ -14,6 +15,7 @@ import { usePlayer } from './hooks/usePlayer';
 import { useOnline } from './hooks/useOnline';
 import { getLocalPlaybackState } from './state/driveState';
 import { getSettings } from './state/db';
+import { fetchMarkdownContent, extractPassage, appendCapture } from './drive/api';
 import type { DriveFile } from './drive/types';
 
 export default function App(): React.JSX.Element {
@@ -22,6 +24,7 @@ export default function App(): React.JSX.Element {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [queueTabActive, setQueueTabActive] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [capturesOpen, setCapturesOpen] = useState(false);
 
   // Ref to archiveFile so the player callback can access it without stale closure
   const archiveFileRef = useRef<
@@ -73,6 +76,30 @@ export default function App(): React.JSX.Element {
     await archiveFile(file.id, file.name, source.folder.name, source.folder.id);
     await refreshQueueCount();
   }, [appState.sources, archiveFile, refreshQueueCount]);
+
+  const handleCapture = useCallback(async (): Promise<void> => {
+    const file = playerState.currentFile;
+    const audioFolderId = appState.audioFolderId;
+    if (!file || !audioFolderId) return;
+
+    const { position, duration } = playerState;
+    const source = appState.sources.find((s) => s.files.some((f) => f.id === file.id));
+    const sourceFolderId = source?.folder.id ?? '';
+
+    const md = sourceFolderId ? await fetchMarkdownContent(sourceFolderId, file.name) : null;
+    const passage = md ? extractPassage(md, position, duration) : '';
+
+    await appendCapture(audioFolderId, {
+      id: `${file.id}-${Date.now()}`,
+      fileId: file.id,
+      fileName: file.name,
+      sourceFolder: source?.folder.name ?? '',
+      audioPosition: position,
+      audioDuration: duration,
+      capturedAt: Date.now(),
+      passage,
+    });
+  }, [playerState, appState.audioFolderId, appState.sources]);
 
   const handlePlayFromSearch = useCallback(async (file: DriveFile, source: typeof appState.sources[number], fileIndex: number): Promise<void> => {
     const sourceIndex = appState.sources.indexOf(source);
@@ -237,9 +264,18 @@ export default function App(): React.JSX.Element {
           onSkipBackward={playerActions.skipBackward}
           onSetSpeed={playerActions.setSpeed}
           onArchive={() => void handleArchiveCurrentPlaying()}
+          onCapture={() => void handleCapture()}
           onClose={() => setPlayerOpen(false)}
           skipSeconds={player_skipSeconds()}
           sourceFolderId={currentFileSource?.folder.id}
+        />
+      )}
+
+      {/* Captures */}
+      {capturesOpen && appState.audioFolderId && (
+        <CapturesList
+          audioFolderId={appState.audioFolderId}
+          onClose={() => setCapturesOpen(false)}
         />
       )}
 
@@ -258,6 +294,7 @@ export default function App(): React.JSX.Element {
           onClose={() => setSettingsOpen(false)}
           audioFolderId={appState.audioFolderId}
           onResync={() => void refresh()}
+          onShowCaptures={() => { setSettingsOpen(false); setCapturesOpen(true); }}
           onSettingsChange={(key, value) => {
             if (key === 'autoRewindSeconds') playerActions.setAutoRewind(value as number);
             if (key === 'skipForwardSeconds' || key === 'skipBackwardSeconds') playerActions.setSkipSeconds(value as number);

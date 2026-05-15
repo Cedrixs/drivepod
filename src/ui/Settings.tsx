@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { XIcon, LogOutIcon, RefreshIcon } from './icons';
+import { XIcon, LogOutIcon, RefreshIcon, BookmarkIcon } from './icons';
 import { getSettings, saveSettings } from '../state/db';
 import { signOut } from '../auth/auth';
 import { clearAudioCache, getCacheStats } from '../offline/cache';
@@ -12,9 +12,10 @@ interface Props {
   audioFolderId: string | null;
   onResync: () => void;
   onSettingsChange?: (key: string, value: number | boolean) => void;
+  onShowCaptures?: () => void;
 }
 
-export function Settings({ onClose, audioFolderId, onResync, onSettingsChange }: Props): React.JSX.Element {
+export function Settings({ onClose, audioFolderId, onResync, onSettingsChange, onShowCaptures }: Props): React.JSX.Element {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [cacheStats, setCacheStats] = useState({ count: 0, totalSize: 0 });
   const [clearing, setClearing] = useState(false);
@@ -208,6 +209,19 @@ export function Settings({ onClose, audioFolderId, onResync, onSettingsChange }:
             {resyncing ? 'Synchronisation...' : 'Resynchroniser depuis Drive'}
           </button>
         </section>
+
+        {/* Captures */}
+        {onShowCaptures && (
+          <section>
+            <button
+              onClick={onShowCaptures}
+              className="flex items-center gap-2 text-sm text-white/60 hover:text-white transition-colors"
+            >
+              <BookmarkIcon size={16} />
+              Voir les passages capturés
+            </button>
+          </section>
+        )}
 
         {/* Account */}
         <section className="pt-4 border-t border-white/10">

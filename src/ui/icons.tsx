@@ -48,6 +48,9 @@ export function CheckIcon(p: IconProps): React.JSX.Element {
 export function LogOutIcon(p: IconProps): React.JSX.Element {
   return <Icon {...p}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></Icon>;
 }
+export function BookmarkIcon(p: IconProps): React.JSX.Element {
+  return <Icon {...p}><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" /></Icon>;
+}
 export function SearchIcon(p: IconProps): React.JSX.Element {
   return <Icon {...p}><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></Icon>;
 }

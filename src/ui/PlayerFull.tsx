@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   PlayIcon, PauseIcon, SkipBackIcon, SkipForwardIcon,
-  ChevronDownIcon, ArchiveIcon,
+  ChevronDownIcon, ArchiveIcon, BookmarkIcon,
 } from './icons';
 import { fetchMarkdownContent, extractSummary } from '../drive/api';
 import type { PlayerHookState } from '../hooks/usePlayer';
@@ -16,6 +16,7 @@ interface Props {
   onSkipBackward: (s: number) => void;
   onSetSpeed: (s: number) => void;
   onArchive: () => void;
+  onCapture: () => void;
   onClose: () => void;
   skipSeconds: number;
   sourceFolderId?: string;
@@ -42,12 +43,14 @@ export function PlayerFull({
   onSkipBackward,
   onSetSpeed,
   onArchive,
+  onCapture,
   onClose,
   skipSeconds,
   sourceFolderId,
 }: Props): React.JSX.Element | null {
   const { currentFile, isPlaying, position, duration, speed, buffering } = playerState;
   const [summary, setSummary] = useState<string | null>(null);
+  const [captured, setCaptured] = useState(false);
 
   useEffect(() => {
     setSummary(null);
@@ -80,9 +83,18 @@ export function PlayerFull({
           <ChevronDownIcon size={24} />
         </button>
         <p className="text-sm font-medium text-white/60 uppercase tracking-wider">En lecture</p>
-        <button onClick={onArchive} className="p-2 text-white/60 hover:text-accent transition-colors">
-          <ArchiveIcon size={20} />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => { onCapture(); setCaptured(true); setTimeout(() => setCaptured(false), 2000); }}
+            className={`p-2 transition-colors ${captured ? 'text-accent' : 'text-white/60 hover:text-accent'}`}
+            title="Capturer ce passage"
+          >
+            <BookmarkIcon size={20} />
+          </button>
+          <button onClick={onArchive} className="p-2 text-white/60 hover:text-accent transition-colors">
+            <ArchiveIcon size={20} />
+          </button>
+        </div>
       </div>
 
       {/* Artwork placeholder */}
