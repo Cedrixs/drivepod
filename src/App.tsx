@@ -132,8 +132,8 @@ export default function App(): React.JSX.Element {
 
   if (appState.loading && !appState.authed) {
     return (
-      <div className="min-h-screen bg-navy-900 flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+      <div className="min-h-screen bg-bg flex items-center justify-center">
+        <div className="w-8 h-8 rounded-full animate-spin" style={{ border: '2px solid var(--surface-3)', borderTopColor: 'var(--accent)' }} />
       </div>
     );
   }
@@ -148,23 +148,34 @@ export default function App(): React.JSX.Element {
   );
 
   return (
-    <div className="min-h-screen bg-navy-900 flex flex-col text-white" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
+    <div className="min-h-screen bg-bg flex flex-col text-text-1" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
       {!online && <OfflineBanner pendingCount={appState.pendingQueueCount} />}
 
       {/* Header */}
-      <header className="flex items-center justify-between px-4 py-3 bg-navy-800 border-b border-white/10">
-        <h1 className="text-lg font-bold text-white">DrivePod</h1>
-        <div className="flex items-center gap-1">
+      <header
+        className="flex items-center justify-between bg-surface-1 border-b border-border-1 px-4"
+        style={{ minHeight: 48, paddingBottom: 12, paddingTop: 8 }}
+      >
+        {/* Logo + wordmark */}
+        <div className="flex items-center gap-2.5">
+          <img src="/drivepod/Logo-Drixs.png" alt="" width={32} height={32} className="flex-shrink-0" style={{ borderRadius: 8 }} />
+          <span className="font-semibold text-text-1" style={{ fontSize: 18, letterSpacing: '-0.02em' }}>
+            DrivePod
+          </span>
+        </div>
+
+        {/* Action buttons — 44×44 touch targets */}
+        <div className="flex items-center">
           <button
             onClick={() => setSearchOpen(true)}
-            className="p-2 text-white/60 hover:text-white transition-colors"
+            className="w-11 h-11 flex items-center justify-center text-text-3 hover:text-text-1 transition-colors"
             title="Rechercher"
           >
             <SearchIcon size={20} />
           </button>
           <button
             onClick={toggleTheme}
-            className="p-2 text-white/60 hover:text-white transition-colors"
+            className="w-11 h-11 flex items-center justify-center text-text-3 hover:text-text-1 transition-colors"
             title={theme === 'dark' ? 'Thème clair' : 'Thème sombre'}
           >
             {theme === 'dark' ? <SunIcon size={20} /> : <MoonIcon size={20} />}
@@ -172,17 +183,26 @@ export default function App(): React.JSX.Element {
           <button
             onClick={() => void refresh()}
             disabled={appState.loading}
-            className="p-2 text-white/60 hover:text-white transition-colors"
+            className="w-11 h-11 flex items-center justify-center text-text-3 hover:text-text-1 transition-colors"
             title="Actualiser"
           >
             <RefreshIcon size={20} className={appState.loading ? 'animate-spin' : ''} />
           </button>
-          <button
-            onClick={() => setSettingsOpen(true)}
-            className="p-2 text-white/60 hover:text-white transition-colors"
-          >
-            <SettingsIcon size={20} />
-          </button>
+          <div className="relative">
+            <button
+              onClick={() => setSettingsOpen(true)}
+              className="w-11 h-11 flex items-center justify-center text-text-3 hover:text-text-1 transition-colors"
+              title="Paramètres"
+            >
+              <SettingsIcon size={20} />
+            </button>
+            {appState.pendingQueueCount > 0 && (
+              <span
+                className="absolute rounded-full bg-accent pointer-events-none"
+                style={{ width: 8, height: 8, top: 8, right: 8, boxShadow: '0 0 0 2px var(--surface-1)' }}
+              />
+            )}
+          </div>
         </div>
       </header>
 
