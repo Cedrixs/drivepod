@@ -112,6 +112,9 @@ export default function App(): React.JSX.Element {
   }
 
   const activeSource = appState.sources[appState.activeSourceIndex];
+  const currentFileSource = appState.sources.find(
+    (s) => s.files.some((f) => f.id === playerState.currentFile?.id),
+  );
 
   return (
     <div className="min-h-screen bg-navy-900 flex flex-col text-white" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
@@ -236,6 +239,7 @@ export default function App(): React.JSX.Element {
           onArchive={() => void handleArchiveCurrentPlaying()}
           onClose={() => setPlayerOpen(false)}
           skipSeconds={player_skipSeconds()}
+          sourceFolderId={currentFileSource?.folder.id}
         />
       )}
 

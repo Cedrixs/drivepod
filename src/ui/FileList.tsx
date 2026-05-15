@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { DownloadIcon, ArchiveIcon, PlayIcon, CheckIcon, ListPlusIcon } from './icons';
 import { downloadForOffline, checkCached } from '../offline/cache';
+import { fetchMarkdownContent, extractSummary } from '../drive/api';
 import { getAllPlaybackStates } from '../state/db';
 import type { DriveFile, PlaybackState } from '../drive/types';
 
@@ -99,9 +100,13 @@ function FileItem({
   fileIndex,
   isOnline,
   playState,
+  sourceFolderId,
 }: FileItemProps): React.JSX.Element {
   const [cached, setCached] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [summary, setSummary] = useState<string | null>(null);
+  const [summaryOpen, setSummaryOpen] = useState(false);
+  const [summaryLoading, setSummaryLoading] = useState(false);
 
   useEffect(() => {
     void checkCached(file.id, file.name).then(setCached);
@@ -125,6 +130,21 @@ function FileItem({
     onArchive(file);
   }, [file, onArchive]);
 
+  const toggleSummary = useCallback(async (e: React.MouseEvent): Promise<void> => {
+    e.stopPropagation();
+    if (summaryOpen) { setSummaryOpen(false); return; }
+    if (summary !== null) { setSummaryOpen(true); return; }
+    setSummaryLoading(true);
+    try {
+      const md = await fetchMarkdownContent(sourceFolderId, file.name);
+      const text = md ? extractSummary(md) : '';
+      setSummary(text || null);
+      if (text) setSummaryOpen(true);
+    } finally {
+      setSummaryLoading(false);
+    }
+  }, [summaryOpen, summary, sourceFolderId, file.name]);
+
   const progress = playState && playState.duration > 0
     ? Math.min(100, (playState.position / playState.duration) * 100)
     : 0;
@@ -134,10 +154,11 @@ function FileItem({
   return (
     <div
       onClick={() => onPlay(file, fileIndex)}
-      className={`flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors border-b border-white/5 ${
+      className={`cursor-pointer transition-colors border-b border-white/5 ${
         isActive ? 'bg-accent/10 border-l-2 border-l-accent' : 'hover:bg-white/5'
       }`}
     >
+    <div className="flex items-center gap-3 px-4 py-3">
       <div className="flex-shrink-0 w-10 h-10 rounded-full bg-white/10 flex items-center justify-center">
         {isActive
           ? <PlayIcon size={16} className="text-accent ml-0.5" />
@@ -169,6 +190,15 @@ function FileItem({
       </div>
 
       <div className="flex items-center gap-1 flex-shrink-0">
+        <button
+          onClick={(e) => void toggleSummary(e)}
+          className={`p-2 transition-colors text-xs font-bold w-7 h-7 flex items-center justify-center rounded-full ${
+            summaryOpen ? 'bg-accent/20 text-accent' : 'text-white/30 hover:text-white/60'
+          }`}
+          title="Résumé"
+        >
+          {summaryLoading ? '…' : 'i'}
+        </button>
         {isOnline && !cached && (
           <button
             onClick={(e) => void handleDownload(e)}
@@ -196,6 +226,15 @@ function FileItem({
           <ArchiveIcon size={16} />
         </button>
       </div>
+    </div>
+    {summaryOpen && summary && (
+      <div
+        className="px-4 pb-3 text-xs text-white/50 leading-relaxed"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {summary}
+      </div>
+    )}
     </div>
   );
 }

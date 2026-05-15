@@ -1,8 +1,9 @@
-import { useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   PlayIcon, PauseIcon, SkipBackIcon, SkipForwardIcon,
   ChevronDownIcon, ArchiveIcon,
 } from './icons';
+import { fetchMarkdownContent, extractSummary } from '../drive/api';
 import type { PlayerHookState } from '../hooks/usePlayer';
 
 interface Props {
@@ -17,6 +18,7 @@ interface Props {
   onArchive: () => void;
   onClose: () => void;
   skipSeconds: number;
+  sourceFolderId?: string;
 }
 
 const SPEEDS = [0.75, 1, 1.25, 1.5, 1.75, 2] as const;
@@ -42,8 +44,18 @@ export function PlayerFull({
   onArchive,
   onClose,
   skipSeconds,
+  sourceFolderId,
 }: Props): React.JSX.Element | null {
   const { currentFile, isPlaying, position, duration, speed, buffering } = playerState;
+  const [summary, setSummary] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSummary(null);
+    if (!currentFile || !sourceFolderId) return;
+    void fetchMarkdownContent(sourceFolderId, currentFile.name).then((md) => {
+      setSummary(md ? extractSummary(md) : null);
+    });
+  }, [currentFile?.id, sourceFolderId]);
 
   const handleSeek = useCallback((e: React.ChangeEvent<HTMLInputElement>): void => {
     onSeek(parseFloat(e.target.value));
@@ -86,6 +98,11 @@ export function PlayerFull({
       {/* Track info */}
       <div className="px-8 py-4">
         <h2 className="text-xl font-bold text-white truncate text-center">{title}</h2>
+        {summary && (
+          <p className="mt-3 text-xs text-white/40 text-center leading-relaxed line-clamp-4">
+            {summary}
+          </p>
+        )}
       </div>
 
       {/* Seek bar */}

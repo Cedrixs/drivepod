@@ -181,6 +181,52 @@ export async function isFileCached(fileId: string, fileName: string): Promise<bo
   return !!cached;
 }
 
+// ── Markdown summary ─────────────────────────────────────────────────────────
+
+const markdownCache = new Map<string, string | null>();
+
+export function extractSummary(markdown: string, maxSentences = 4): string {
+  const text = markdown
+    .replace(/#{1,6}\s+[^\n]*/g, '')
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/\*(.+?)\*/g, '$1')
+    .replace(/\[(.+?)\]\(.+?\)/g, '$1')
+    .replace(/`(.+?)`/g, '$1')
+    .replace(/^[-*+]\s+/gm, '')
+    .replace(/^\d+\.\s+/gm, '')
+    .replace(/\n+/g, ' ')
+    .trim();
+  const sentences = text.split(/(?<=[.!?])\s+/).filter((s) => s.trim().length > 10);
+  return sentences.slice(0, maxSentences).join(' ').trim();
+}
+
+export async function fetchMarkdownContent(parentFolderId: string, mp3FileName: string): Promise<string | null> {
+  const mdName = mp3FileName.replace(/\.mp3$/i, '.md');
+  const cacheKey = `${parentFolderId}/${mdName}`;
+  if (markdownCache.has(cacheKey)) return markdownCache.get(cacheKey) ?? null;
+
+  const token = await getAccessToken();
+  const q = `name='${mdName}' and '${parentFolderId}' in parents and trashed=false`;
+  const params = new URLSearchParams({ q, fields: 'files(id)', pageSize: '1' });
+
+  const listResp = await fetch(`${BASE}/files?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!listResp.ok) { markdownCache.set(cacheKey, null); return null; }
+
+  const listData = await listResp.json() as { files: { id: string }[] };
+  if (!listData.files.length) { markdownCache.set(cacheKey, null); return null; }
+
+  const contentResp = await fetch(`${BASE}/files/${listData.files[0].id}?alt=media`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!contentResp.ok) { markdownCache.set(cacheKey, null); return null; }
+
+  const text = await contentResp.text();
+  markdownCache.set(cacheKey, text);
+  return text;
+}
+
 export interface StateFileContent {
   version: number;
   files: Record<string, {
