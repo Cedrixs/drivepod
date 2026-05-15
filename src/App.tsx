@@ -3,11 +3,12 @@ import { AuthScreen } from './ui/AuthButton';
 import { SourceTabs } from './ui/SourceTabs';
 import { FileList } from './ui/FileList';
 import { QueueList } from './ui/QueueList';
+import { SearchBar } from './ui/SearchBar';
 import { PlayerBar } from './ui/PlayerBar';
 import { PlayerFull } from './ui/PlayerFull';
 import { Settings } from './ui/Settings';
 import { OfflineBanner } from './ui/OfflineBanner';
-import { SettingsIcon, RefreshIcon } from './ui/icons';
+import { SettingsIcon, RefreshIcon, SearchIcon } from './ui/icons';
 import { useApp } from './hooks/useApp';
 import { usePlayer } from './hooks/usePlayer';
 import { useOnline } from './hooks/useOnline';
@@ -20,6 +21,7 @@ export default function App(): React.JSX.Element {
   const [playerOpen, setPlayerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [queueTabActive, setQueueTabActive] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
 
   // Ref to archiveFile so the player callback can access it without stale closure
   const archiveFileRef = useRef<
@@ -72,6 +74,20 @@ export default function App(): React.JSX.Element {
     await refreshQueueCount();
   }, [appState.sources, archiveFile, refreshQueueCount]);
 
+  const handlePlayFromSearch = useCallback(async (file: DriveFile, source: typeof appState.sources[number], fileIndex: number): Promise<void> => {
+    const sourceIndex = appState.sources.indexOf(source);
+    if (sourceIndex >= 0) setActiveSource(sourceIndex);
+    setQueueTabActive(false);
+
+    const settings = await getSettings();
+    playerActions.setQueue(source.files, source.folder.name, fileIndex);
+    playerActions.setSpeed(settings.defaultSpeed);
+    playerActions.setSkipSeconds(settings.skipForwardSeconds);
+
+    const savedState = await getLocalPlaybackState(file.id);
+    await playerActions.loadAndPlay(file, source.folder.name, savedState?.position ?? 0);
+  }, [appState.sources, playerActions, setActiveSource]);
+
   const handleArchiveCurrentPlaying = useCallback(async (): Promise<void> => {
     const file = playerState.currentFile;
     if (!file) return;
@@ -104,7 +120,14 @@ export default function App(): React.JSX.Element {
       {/* Header */}
       <header className="flex items-center justify-between px-4 py-3 bg-navy-800 border-b border-white/10">
         <h1 className="text-lg font-bold text-white">DrivePod</h1>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setSearchOpen(true)}
+            className="p-2 text-white/60 hover:text-white transition-colors"
+            title="Rechercher"
+          >
+            <SearchIcon size={20} />
+          </button>
           <button
             onClick={() => void refresh()}
             disabled={appState.loading}
@@ -213,6 +236,15 @@ export default function App(): React.JSX.Element {
           onArchive={() => void handleArchiveCurrentPlaying()}
           onClose={() => setPlayerOpen(false)}
           skipSeconds={player_skipSeconds()}
+        />
+      )}
+
+      {/* Search */}
+      {searchOpen && (
+        <SearchBar
+          sources={appState.sources}
+          onPlay={(file, source, fileIndex) => void handlePlayFromSearch(file, source, fileIndex)}
+          onClose={() => setSearchOpen(false)}
         />
       )}
 
