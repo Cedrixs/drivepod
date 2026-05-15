@@ -1,6 +1,7 @@
 node_modules
 dist
 .claude/
+design_handoff_drivepod_v2/
 dist-ssr
 *.local
 .env
