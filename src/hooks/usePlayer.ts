@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { player } from '../player/player';
+import { getSettings } from '../state/db';
 import type { DriveFile } from '../drive/types';
 import type { PlayerEvent } from '../player/player';
 
@@ -40,8 +41,13 @@ export function usePlayer(onArchive?: (fileId: string, fileName: string, sourceF
   loadAndPlay: (file: DriveFile, source: string, startPos?: number) => Promise<void>;
   setQueue: (files: DriveFile[], source: string, startIndex?: number) => void;
   setSkipSeconds: (s: number) => void;
+  setAutoRewind: (s: number) => void;
 } {
   const [state, setState] = useState<PlayerHookState>(initialState);
+
+  useEffect(() => {
+    void getSettings().then((s) => player.setAutoRewind(s.autoRewindSeconds));
+  }, []);
 
   useEffect(() => {
     const off = player.on((event: PlayerEvent) => {
@@ -104,5 +110,6 @@ export function usePlayer(onArchive?: (fileId: string, fileName: string, sourceF
     loadAndPlay,
     setQueue,
     setSkipSeconds: (s: number) => { player.skipSeconds = s; },
+    setAutoRewind: (s: number) => { player.setAutoRewind(s); },
   };
 }

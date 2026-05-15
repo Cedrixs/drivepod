@@ -45,6 +45,9 @@ class AudioPlayer {
   private currentIndex = -1;
   skipSeconds = 30;
   private isLoadingNext = false;
+  private autoRewindSeconds = 5;
+  private pausedAt: number | null = null;
+  private static readonly REWIND_THRESHOLD_MS = 30_000;
 
   constructor() {
     this.audio = new Audio();
@@ -190,7 +193,12 @@ class AudioPlayer {
     this.skipSeconds = seconds;
   }
 
+  setAutoRewind(seconds: number): void {
+    this.autoRewindSeconds = seconds;
+  }
+
   async loadAndPlay(file: DriveFile, sourceFolder: string, startPosition = 0): Promise<void> {
+    this.pausedAt = null;
     this.stopSaveTimer();
     await this.savePosition();
 
@@ -238,10 +246,18 @@ class AudioPlayer {
   }
 
   async play(): Promise<void> {
+    if (this.pausedAt !== null && this.autoRewindSeconds > 0) {
+      const elapsed = Date.now() - this.pausedAt;
+      if (elapsed >= AudioPlayer.REWIND_THRESHOLD_MS) {
+        this.skip(-this.autoRewindSeconds);
+      }
+    }
+    this.pausedAt = null;
     try { await this.audio.play(); } catch { /* user gesture required */ }
   }
 
   pause(): void {
+    this.pausedAt = Date.now();
     this.audio.pause();
     this.stopSaveTimer();
     void this.savePosition();

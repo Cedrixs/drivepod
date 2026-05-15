@@ -53,6 +53,7 @@ export interface AppSettings {
   skipBackwardSeconds: number;
   autoDownload: boolean;
   autoDownloadCount: number;
+  autoRewindSeconds: number;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -61,4 +62,5 @@ export const DEFAULT_SETTINGS: AppSettings = {
   skipBackwardSeconds: 30,
   autoDownload: false,
   autoDownloadCount: 5,
+  autoRewindSeconds: 5,
 };

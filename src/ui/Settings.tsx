@@ -11,9 +11,10 @@ interface Props {
   onClose: () => void;
   audioFolderId: string | null;
   onResync: () => void;
+  onSettingsChange?: (key: string, value: number | boolean) => void;
 }
 
-export function Settings({ onClose, audioFolderId, onResync }: Props): React.JSX.Element {
+export function Settings({ onClose, audioFolderId, onResync, onSettingsChange }: Props): React.JSX.Element {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [cacheStats, setCacheStats] = useState({ count: 0, totalSize: 0 });
   const [clearing, setClearing] = useState(false);
@@ -28,6 +29,9 @@ export function Settings({ onClose, audioFolderId, onResync }: Props): React.JSX
     const updated = { ...settings, [key]: value };
     setSettings(updated);
     await saveSettings(updated);
+    if (typeof value === 'number' || typeof value === 'boolean') {
+      onSettingsChange?.(key, value);
+    }
   };
 
   const handleClearCache = async (): Promise<void> => {
@@ -107,6 +111,28 @@ export function Settings({ onClose, audioFolderId, onResync }: Props): React.JSX
                     }`}
                   >
                     {s}s
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="text-sm text-white/80 block mb-2">
+                Recul à la reprise
+                <span className="ml-2 text-xs text-white/40">après pause &gt; 30 s</span>
+              </label>
+              <div className="flex gap-2 flex-wrap">
+                {([0, 5, 10, 15, 20] as const).map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => void updateSetting('autoRewindSeconds', s)}
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                      settings.autoRewindSeconds === s
+                        ? 'bg-accent text-white'
+                        : 'bg-white/10 text-white/60 hover:bg-white/20'
+                    }`}
+                  >
+                    {s === 0 ? 'Off' : `${s}s`}
                   </button>
                 ))}
               </div>

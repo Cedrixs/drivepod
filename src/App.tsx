@@ -194,6 +194,10 @@ export default function App(): React.JSX.Element {
           onClose={() => setSettingsOpen(false)}
           audioFolderId={appState.audioFolderId}
           onResync={() => void refresh()}
+          onSettingsChange={(key, value) => {
+            if (key === 'autoRewindSeconds') playerActions.setAutoRewind(value as number);
+            if (key === 'skipForwardSeconds' || key === 'skipBackwardSeconds') playerActions.setSkipSeconds(value as number);
+          }}
         />
       )}
     </div>
