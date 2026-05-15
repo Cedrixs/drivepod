@@ -18,6 +18,11 @@ export interface PlayerState {
   error: string | null;
 }
 
+export interface QueuedFile {
+  file: DriveFile;
+  sourceFolder: string;
+}
+
 export type PlayerEvent =
   | { type: 'timeupdate'; position: number; duration: number }
   | { type: 'play' }
@@ -27,7 +32,8 @@ export type PlayerEvent =
   | { type: 'buffering'; value: boolean }
   | { type: 'loaded'; duration: number }
   | { type: 'archive'; fileId: string; fileName: string; sourceFolder: string }
-  | { type: 'trackchange'; file: DriveFile; index: number };
+  | { type: 'trackchange'; file: DriveFile; index: number }
+  | { type: 'queueupdate'; customQueue: QueuedFile[] };
 
 type EventListener = (event: PlayerEvent) => void;
 
@@ -48,6 +54,8 @@ class AudioPlayer {
   private autoRewindSeconds = 5;
   private pausedAt: number | null = null;
   private static readonly REWIND_THRESHOLD_MS = 30_000;
+
+  private customQueue: QueuedFile[] = [];
 
   private audioCtx: AudioContext | null = null;
   private sourceNode: MediaElementAudioSourceNode | null = null;
@@ -317,8 +325,36 @@ class AudioPlayer {
     this.audio.playbackRate = speed;
   }
 
+  addToCustomQueue(file: DriveFile, sourceFolder: string): void {
+    this.customQueue.push({ file, sourceFolder });
+    this.emit({ type: 'queueupdate', customQueue: [...this.customQueue] });
+  }
+
+  removeFromCustomQueue(index: number): void {
+    this.customQueue.splice(index, 1);
+    this.emit({ type: 'queueupdate', customQueue: [...this.customQueue] });
+  }
+
+  clearCustomQueue(): void {
+    this.customQueue = [];
+    this.emit({ type: 'queueupdate', customQueue: [] });
+  }
+
+  getCustomQueue(): QueuedFile[] {
+    return [...this.customQueue];
+  }
+
   async playNext(): Promise<void> {
     if (this.isLoadingNext) return;
+    // Custom queue has priority over folder order
+    if (this.customQueue.length > 0) {
+      this.isLoadingNext = true;
+      const next = this.customQueue.shift()!;
+      this.emit({ type: 'queueupdate', customQueue: [...this.customQueue] });
+      this.isLoadingNext = false;
+      await this.loadAndPlay(next.file, next.sourceFolder);
+      return;
+    }
     if (this.currentIndex < this.queue.length - 1) {
       this.isLoadingNext = true;
       this.currentIndex++;

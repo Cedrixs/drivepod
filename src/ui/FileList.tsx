@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { DownloadIcon, ArchiveIcon, PlayIcon, CheckIcon } from './icons';
+import { DownloadIcon, ArchiveIcon, PlayIcon, CheckIcon, ListPlusIcon } from './icons';
 import { downloadForOffline, checkCached } from '../offline/cache';
 import { getAllPlaybackStates } from '../state/db';
 import type { DriveFile, PlaybackState } from '../drive/types';
@@ -67,6 +67,7 @@ interface FileItemProps {
   sourceFolderId: string;
   onPlay: (file: DriveFile, index: number) => void;
   onArchive: (file: DriveFile) => void;
+  onAddToQueue?: (file: DriveFile) => void;
   fileIndex: number;
   isOnline: boolean;
   playState: PlaybackState | undefined;
@@ -94,6 +95,7 @@ function FileItem({
   isActive,
   onPlay,
   onArchive,
+  onAddToQueue,
   fileIndex,
   isOnline,
   playState,
@@ -177,6 +179,15 @@ function FileItem({
             <DownloadIcon size={16} className={downloading ? 'animate-bounce' : ''} />
           </button>
         )}
+        {onAddToQueue && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onAddToQueue(file); }}
+            className="p-2 text-white/40 hover:text-accent transition-colors"
+            title="Ajouter à la file"
+          >
+            <ListPlusIcon size={16} />
+          </button>
+        )}
         <button
           onClick={handleArchive}
           className="p-2 text-white/40 hover:text-accent transition-colors"
@@ -198,6 +209,7 @@ interface FileListProps {
   currentFileId: string | null;
   onPlay: (file: DriveFile, index: number) => void;
   onArchive: (file: DriveFile) => void;
+  onAddToQueue?: (file: DriveFile) => void;
   isOnline: boolean;
   onRefresh: () => void;
 }
@@ -209,6 +221,7 @@ export function FileList({
   currentFileId,
   onPlay,
   onArchive,
+  onAddToQueue,
   isOnline,
   onRefresh,
 }: FileListProps): React.JSX.Element {
@@ -282,6 +295,7 @@ export function FileList({
             sourceFolderId={sourceFolderId}
             onPlay={onPlay}
             onArchive={onArchive}
+            onAddToQueue={onAddToQueue}
             fileIndex={i}
             isOnline={isOnline}
             playState={stateMap.get(file.id)}

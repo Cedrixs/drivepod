@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { AuthScreen } from './ui/AuthButton';
 import { SourceTabs } from './ui/SourceTabs';
 import { FileList } from './ui/FileList';
+import { QueueList } from './ui/QueueList';
 import { PlayerBar } from './ui/PlayerBar';
 import { PlayerFull } from './ui/PlayerFull';
 import { Settings } from './ui/Settings';
@@ -18,6 +19,7 @@ export default function App(): React.JSX.Element {
   const online = useOnline();
   const [playerOpen, setPlayerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [queueTabActive, setQueueTabActive] = useState(false);
 
   // Ref to archiveFile so the player callback can access it without stale closure
   const archiveFileRef = useRef<
@@ -32,6 +34,11 @@ export default function App(): React.JSX.Element {
   );
 
   const { state: playerState, ...playerActions } = usePlayer(handleArchiveFromPlayer);
+
+  // Auto-deactivate queue tab when queue empties
+  useEffect(() => {
+    if (playerState.customQueue.length === 0) setQueueTabActive(false);
+  }, [playerState.customQueue.length]);
 
   const { state: appState, refresh, archiveFile, setActiveSource, refreshQueueCount } = useApp(online);
 
@@ -119,7 +126,10 @@ export default function App(): React.JSX.Element {
       <SourceTabs
         sources={appState.sources}
         activeIndex={appState.activeSourceIndex}
-        onSelect={setActiveSource}
+        onSelect={(i) => { setQueueTabActive(false); setActiveSource(i); }}
+        queueCount={playerState.customQueue.length}
+        queueActive={queueTabActive}
+        onQueueSelect={() => setQueueTabActive(true)}
       />
 
       {/* File list */}
@@ -136,6 +146,21 @@ export default function App(): React.JSX.Element {
           <div className="flex items-center justify-center py-16">
             <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
           </div>
+        ) : queueTabActive ? (
+          <QueueList
+            queue={playerState.customQueue}
+            currentFileId={playerState.currentFile?.id ?? null}
+            onRemove={playerActions.removeFromCustomQueue}
+            onClear={() => { playerActions.clearCustomQueue(); setQueueTabActive(false); }}
+            onPlayNow={async (item, index) => {
+              playerActions.removeFromCustomQueue(index);
+              const savedState = await getLocalPlaybackState(item.file.id);
+              const settings = await getSettings();
+              playerActions.setSpeed(settings.defaultSpeed);
+              playerActions.setSkipSeconds(settings.skipForwardSeconds);
+              await playerActions.loadAndPlay(item.file, item.sourceFolder, savedState?.position ?? 0);
+            }}
+          />
         ) : activeSource ? (
           <FileList
             files={activeSource.files}
@@ -144,6 +169,9 @@ export default function App(): React.JSX.Element {
             currentFileId={playerState.currentFile?.id ?? null}
             onPlay={(file, index) => void handlePlayFile(file, index)}
             onArchive={(file) => void handleArchive(file)}
+            onAddToQueue={(file) => {
+              playerActions.addToCustomQueue(file, activeSource.folder.name);
+            }}
             isOnline={online}
             onRefresh={() => void refresh()}
           />
