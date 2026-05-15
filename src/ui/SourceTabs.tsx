@@ -10,7 +10,7 @@ export function SourceTabs({ sources, activeIndex, onSelect }: Props): React.JSX
   if (sources.length === 0) {
     return (
       <div className="px-4 py-2 text-navy-100/50 text-sm">
-        Aucune source — créez des sous-dossiers dans Audio/ sur Drive
+        Aucune source — ajoutez des MP3 dans Audio/ ou ses sous-dossiers sur Drive
       </div>
     );
   }

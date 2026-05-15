@@ -6,16 +6,90 @@ Lecteur audio PWA pour Google Drive. Lit vos MP3 depuis le dossier `Audio/` de v
 
 ---
 
+## Fonctionnalités
+
+### Sources et navigation
+
+- Onglets par sous-dossier de `Audio/` (Books, Articles, etc.), détectés dynamiquement
+- Fichiers directement à la racine d'`Audio/` affichés dans un onglet dédié
+- Actualisation manuelle de la liste
+- Actualisation automatique au retour du focus sur l'app
+
+### Lecture
+
+- Streaming MP3 depuis Google Drive via proxy Service Worker (header `Authorization`)
+- Reprise automatique à la position sauvegardée à l'ouverture d'un fichier
+- Play / Pause
+- Track précédent / suivant (queue = tous les fichiers du dossier courant)
+- Saut avant / arrière configurable (15 s ou 30 s)
+- Seek interactif (barre glissable)
+- Vitesses : 0.75×, 1×, 1.25×, 1.5×, 1.75×, 2×
+- Indicateur de buffering
+- Retry automatique 3 s après une erreur réseau (si online)
+- Lecture offline si le fichier est téléchargé en cache
+
+### Interface player
+
+- **Mini-barre** en bas : titre, barre de progression, play/pause, skip
+- **Vue plein écran** : titre, seek bar avec timestamps, contrôles complets (prev / skip-back / play / skip-fwd / next), sélecteur de vitesse
+
+### Commandes système (Media Session API)
+
+- Contrôles depuis le panneau de notification Android
+- Contrôles sur l'écran de verrouillage
+- Boutons physiques des écouteurs/casques Bluetooth (play/pause, track prev/next, seek)
+- Titre visible sur l'écran de verrouillage
+
+### Archivage
+
+- **Auto à 95 %** de progression → déplace le fichier vers `Archive/YYYY-MM/<source>/` sur Drive
+- **Manuel** depuis la liste ou le player plein écran
+- Passage automatique au fichier suivant après archivage
+- **File d'attente offline** : si hors-ligne, l'opération est enqueued et exécutée au retour online
+
+### Mode hors-ligne
+
+- Téléchargement manuel d'un fichier (bouton dans la liste, visible si online)
+- Téléchargement automatique des N plus anciens fichiers au démarrage (réglable, 5 par défaut)
+- Indicateur ✓ sur les fichiers mis en cache
+- Stats du cache (nombre de fichiers + taille totale) dans les réglages
+- Vidage du cache depuis les réglages
+- Bannière hors-ligne et badge du nombre d'actions en attente
+
+### Synchronisation multi-device
+
+- Sauvegarde de position en IndexedDB toutes les 5 s pendant la lecture
+- Sauvegarde immédiate à la pause, à la fermeture, au changement de visibilité
+- Flush vers `_drivepod_state.json` sur Drive 30 s après la dernière modification (debounce)
+- **Merge au démarrage** : compare timestamps local vs Drive, garde le plus récent par fichier
+- Resynchronisation manuelle depuis les réglages
+
+### Affichage de la liste
+
+Pour chaque fichier : numéro d'ordre, titre, date de création, position / durée si déjà écouté, barre de progression, indicateur de cache, mise en surbrillance si en cours de lecture.
+
+### Réglages
+
+- Vitesse de lecture par défaut (0.75× à 2×)
+- Durée des sauts avant/arrière (15 s ou 30 s)
+- Téléchargement automatique on/off
+- Vider le cache hors-ligne
+- Resynchroniser depuis Drive
+- Se déconnecter
+
+---
+
 ## Architecture Drive
 
 ```
 Audio/
-├── Books/          ← onglet "Books"
+├── fichier-racine.mp3  ← onglet "Audio"
+├── Books/              ← onglet "Books"
 │   ├── chapitre1.mp3
 │   └── chapitre2.mp3
-├── Articles/       ← onglet "Articles"
+├── Articles/           ← onglet "Articles"
 │   └── article1.mp3
-└── Archive/        ← créé automatiquement
+└── Archive/            ← créé automatiquement
     └── 2026-05/
         ├── Books/
         └── Articles/

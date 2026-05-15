@@ -49,15 +49,24 @@ export function useApp(online: boolean): {
   const audioFolderIdRef = useRef<string | null>(null);
 
   const loadSources = useCallback(async (audioFolderId: string): Promise<void> => {
-    const subfolders = await listSubfolders(audioFolderId);
+    const [subfolders, rootFiles] = await Promise.all([
+      listSubfolders(audioFolderId),
+      listChildren(audioFolderId, 'audio/mpeg'),
+    ]);
     const nonArchive = subfolders.filter((f) => f.name !== 'Archive');
 
-    const sources: Source[] = await Promise.all(
+    const subSources: Source[] = await Promise.all(
       nonArchive.map(async (folder) => {
         const files = await listChildren(folder.id, 'audio/mpeg');
         return { folder, files };
       }),
     );
+
+    const sources: Source[] = [];
+    if (rootFiles.length > 0) {
+      sources.push({ folder: { id: audioFolderId, name: AUDIO_FOLDER_NAME, parents: [] }, files: rootFiles });
+    }
+    sources.push(...subSources);
 
     setState((s) => ({ ...s, sources, loading: false }));
   }, []);
@@ -144,14 +153,23 @@ export function useApp(online: boolean): {
   }, [online, loadSources]);
 
   async function loadSourcesRaw(audioFolderId: string): Promise<Source[]> {
-    const subfolders = await listSubfolders(audioFolderId);
+    const [subfolders, rootFiles] = await Promise.all([
+      listSubfolders(audioFolderId),
+      listChildren(audioFolderId, 'audio/mpeg'),
+    ]);
     const nonArchive = subfolders.filter((f) => f.name !== 'Archive');
-    return Promise.all(
+    const subSources = await Promise.all(
       nonArchive.map(async (folder) => {
         const files = await listChildren(folder.id, 'audio/mpeg');
         return { folder, files };
       }),
     );
+    const sources: Source[] = [];
+    if (rootFiles.length > 0) {
+      sources.push({ folder: { id: audioFolderId, name: AUDIO_FOLDER_NAME, parents: [] }, files: rootFiles });
+    }
+    sources.push(...subSources);
+    return sources;
   }
 
   useEffect(() => { void init(); }, [init]);
