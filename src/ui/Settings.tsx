@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { XIcon, LogOutIcon, RefreshIcon } from './icons';
+import { XIcon, LogOutIcon, RefreshIcon, BookmarkIcon } from './icons';
 import { getSettings, saveSettings } from '../state/db';
 import { signOut } from '../auth/auth';
 import { clearAudioCache, getCacheStats } from '../offline/cache';
@@ -11,9 +11,11 @@ interface Props {
   onClose: () => void;
   audioFolderId: string | null;
   onResync: () => void;
+  onSettingsChange?: (key: string, value: number | boolean) => void;
+  onShowCaptures?: () => void;
 }
 
-export function Settings({ onClose, audioFolderId, onResync }: Props): React.JSX.Element {
+export function Settings({ onClose, audioFolderId, onResync, onSettingsChange, onShowCaptures }: Props): React.JSX.Element {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [cacheStats, setCacheStats] = useState({ count: 0, totalSize: 0 });
   const [clearing, setClearing] = useState(false);
@@ -28,6 +30,7 @@ export function Settings({ onClose, audioFolderId, onResync }: Props): React.JSX
     const updated = { ...settings, [key]: value };
     setSettings(updated);
     await saveSettings(updated);
+    onSettingsChange?.(key as string, value as number | boolean);
   };
 
   const handleClearCache = async (): Promise<void> => {
@@ -111,6 +114,51 @@ export function Settings({ onClose, audioFolderId, onResync }: Props): React.JSX
                 ))}
               </div>
             </div>
+
+            <div>
+              <label className="text-sm text-white/80 block mb-2">
+                Recul à la reprise
+                <span className="ml-2 text-xs text-white/40">après pause &gt; 30 s</span>
+              </label>
+              <div className="flex gap-2 flex-wrap">
+                {([0, 5, 10, 15, 20] as const).map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => void updateSetting('autoRewindSeconds', s)}
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                      settings.autoRewindSeconds === s
+                        ? 'bg-accent text-white'
+                        : 'bg-white/10 text-white/60 hover:bg-white/20'
+                    }`}
+                  >
+                    {s === 0 ? 'Off' : `${s}s`}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Voice boost */}
+        <section>
+          <h3 className="text-xs font-semibold text-white/40 uppercase tracking-wider mb-3">Audio</h3>
+          <div className="flex items-center justify-between">
+            <div>
+              <label className="text-sm text-white/80">Boost voix</label>
+              <p className="text-xs text-white/40 mt-0.5">Compresseur — meilleure intelligibilité dans le bruit</p>
+            </div>
+            <button
+              onClick={() => void updateSetting('voiceBoost', !settings.voiceBoost)}
+              className={`w-12 h-6 rounded-full transition-colors ${
+                settings.voiceBoost ? 'bg-accent' : 'bg-white/20'
+              } relative flex-shrink-0`}
+            >
+              <span
+                className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${
+                  settings.voiceBoost ? 'left-6' : 'left-0.5'
+                }`}
+              />
+            </button>
           </div>
         </section>
 
@@ -161,6 +209,19 @@ export function Settings({ onClose, audioFolderId, onResync }: Props): React.JSX
             {resyncing ? 'Synchronisation...' : 'Resynchroniser depuis Drive'}
           </button>
         </section>
+
+        {/* Captures */}
+        {onShowCaptures && (
+          <section>
+            <button
+              onClick={onShowCaptures}
+              className="flex items-center gap-2 text-sm text-white/60 hover:text-white transition-colors"
+            >
+              <BookmarkIcon size={16} />
+              Voir les passages capturés
+            </button>
+          </section>
+        )}
 
         {/* Account */}
         <section className="pt-4 border-t border-white/10">

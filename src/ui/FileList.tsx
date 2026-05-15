@@ -1,9 +1,65 @@
-import { useState, useEffect, useCallback } from 'react';
-import { DownloadIcon, ArchiveIcon, PlayIcon, CheckIcon } from './icons';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { DownloadIcon, ArchiveIcon, PlayIcon, CheckIcon, ListPlusIcon } from './icons';
 import { downloadForOffline, checkCached } from '../offline/cache';
-import type { DriveFile } from '../drive/types';
-import type { PlaybackState } from '../drive/types';
-import { getPlaybackState } from '../state/db';
+import { fetchMarkdownContent, extractSummary } from '../drive/api';
+import { getAllPlaybackStates } from '../state/db';
+import type { DriveFile, PlaybackState } from '../drive/types';
+
+// ── Sort & filter types ──────────────────────────────────────────────────────
+
+type SortKey = 'date-asc' | 'date-desc' | 'duration' | 'progress';
+type FilterKey = 'all' | 'not-started' | 'in-progress' | 'almost-done';
+
+const SORT_LABELS: Record<SortKey, string> = {
+  'date-asc': 'Date ↑',
+  'date-desc': 'Date ↓',
+  duration: 'Durée',
+  progress: 'Progression',
+};
+
+const FILTER_LABELS: Record<FilterKey, string> = {
+  all: 'Tous',
+  'not-started': 'Non commencés',
+  'in-progress': 'À reprendre',
+  'almost-done': 'Presque finis',
+};
+
+function getProgress(state: PlaybackState | undefined): number {
+  if (!state || !state.duration) return 0;
+  return state.position / state.duration;
+}
+
+function applySort(files: DriveFile[], sort: SortKey, states: Map<string, PlaybackState>): DriveFile[] {
+  const sorted = [...files];
+  switch (sort) {
+    case 'date-asc':
+      return sorted.sort((a, b) => a.createdTime.localeCompare(b.createdTime));
+    case 'date-desc':
+      return sorted.sort((a, b) => b.createdTime.localeCompare(a.createdTime));
+    case 'duration':
+      return sorted.sort((a, b) => {
+        const da = states.get(a.id)?.duration ?? -1;
+        const db = states.get(b.id)?.duration ?? -1;
+        return db - da; // longest first; unknowns (-1) go last
+      });
+    case 'progress':
+      return sorted.sort((a, b) => getProgress(states.get(b.id)) - getProgress(states.get(a.id)));
+  }
+}
+
+function applyFilter(files: DriveFile[], filter: FilterKey, states: Map<string, PlaybackState>): DriveFile[] {
+  if (filter === 'all') return files;
+  return files.filter((f) => {
+    const p = getProgress(states.get(f.id));
+    switch (filter) {
+      case 'not-started': return p === 0;
+      case 'in-progress': return p > 0 && p < 0.95;
+      case 'almost-done': return p >= 0.8 && p < 0.95;
+    }
+  });
+}
+
+// ── FileItem ─────────────────────────────────────────────────────────────────
 
 interface FileItemProps {
   file: DriveFile;
@@ -12,8 +68,10 @@ interface FileItemProps {
   sourceFolderId: string;
   onPlay: (file: DriveFile, index: number) => void;
   onArchive: (file: DriveFile) => void;
+  onAddToQueue?: (file: DriveFile) => void;
   fileIndex: number;
   isOnline: boolean;
+  playState: PlaybackState | undefined;
 }
 
 function formatDuration(seconds: number): string {
@@ -38,16 +96,20 @@ function FileItem({
   isActive,
   onPlay,
   onArchive,
+  onAddToQueue,
   fileIndex,
   isOnline,
+  playState,
+  sourceFolderId,
 }: FileItemProps): React.JSX.Element {
   const [cached, setCached] = useState(false);
   const [downloading, setDownloading] = useState(false);
-  const [playState, setPlayState] = useState<PlaybackState | null>(null);
+  const [summary, setSummary] = useState<string | null>(null);
+  const [summaryOpen, setSummaryOpen] = useState(false);
+  const [summaryLoading, setSummaryLoading] = useState(false);
 
   useEffect(() => {
     void checkCached(file.id, file.name).then(setCached);
-    void getPlaybackState(file.id).then((s) => setPlayState(s ?? null));
   }, [file.id, file.name]);
 
   const handleDownload = useCallback(async (e: React.MouseEvent): Promise<void> => {
@@ -68,6 +130,21 @@ function FileItem({
     onArchive(file);
   }, [file, onArchive]);
 
+  const toggleSummary = useCallback(async (e: React.MouseEvent): Promise<void> => {
+    e.stopPropagation();
+    if (summaryOpen) { setSummaryOpen(false); return; }
+    if (summary !== null) { setSummaryOpen(true); return; }
+    setSummaryLoading(true);
+    try {
+      const md = await fetchMarkdownContent(sourceFolderId, file.name);
+      const text = md ? extractSummary(md) : '';
+      setSummary(text || null);
+      if (text) setSummaryOpen(true);
+    } finally {
+      setSummaryLoading(false);
+    }
+  }, [summaryOpen, summary, sourceFolderId, file.name]);
+
   const progress = playState && playState.duration > 0
     ? Math.min(100, (playState.position / playState.duration) * 100)
     : 0;
@@ -77,10 +154,11 @@ function FileItem({
   return (
     <div
       onClick={() => onPlay(file, fileIndex)}
-      className={`flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors border-b border-white/5 ${
+      className={`cursor-pointer transition-colors border-b border-white/5 ${
         isActive ? 'bg-accent/10 border-l-2 border-l-accent' : 'hover:bg-white/5'
       }`}
     >
+    <div className="flex items-center gap-3 px-4 py-3">
       <div className="flex-shrink-0 w-10 h-10 rounded-full bg-white/10 flex items-center justify-center">
         {isActive
           ? <PlayIcon size={16} className="text-accent ml-0.5" />
@@ -112,6 +190,15 @@ function FileItem({
       </div>
 
       <div className="flex items-center gap-1 flex-shrink-0">
+        <button
+          onClick={(e) => void toggleSummary(e)}
+          className={`p-2 transition-colors text-xs font-bold w-7 h-7 flex items-center justify-center rounded-full ${
+            summaryOpen ? 'bg-accent/20 text-accent' : 'text-white/30 hover:text-white/60'
+          }`}
+          title="Résumé"
+        >
+          {summaryLoading ? '…' : 'i'}
+        </button>
         {isOnline && !cached && (
           <button
             onClick={(e) => void handleDownload(e)}
@@ -120,6 +207,15 @@ function FileItem({
             title="Télécharger hors-ligne"
           >
             <DownloadIcon size={16} className={downloading ? 'animate-bounce' : ''} />
+          </button>
+        )}
+        {onAddToQueue && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onAddToQueue(file); }}
+            className="p-2 text-white/40 hover:text-accent transition-colors"
+            title="Ajouter à la file"
+          >
+            <ListPlusIcon size={16} />
           </button>
         )}
         <button
@@ -131,8 +227,19 @@ function FileItem({
         </button>
       </div>
     </div>
+    {summaryOpen && summary && (
+      <div
+        className="px-4 pb-3 text-xs text-white/50 leading-relaxed"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {summary}
+      </div>
+    )}
+    </div>
   );
 }
+
+// ── FileList ─────────────────────────────────────────────────────────────────
 
 interface FileListProps {
   files: DriveFile[];
@@ -141,6 +248,7 @@ interface FileListProps {
   currentFileId: string | null;
   onPlay: (file: DriveFile, index: number) => void;
   onArchive: (file: DriveFile) => void;
+  onAddToQueue?: (file: DriveFile) => void;
   isOnline: boolean;
   onRefresh: () => void;
 }
@@ -152,9 +260,55 @@ export function FileList({
   currentFileId,
   onPlay,
   onArchive,
+  onAddToQueue,
   isOnline,
   onRefresh,
 }: FileListProps): React.JSX.Element {
+  const [sort, setSort] = useState<SortKey>('date-asc');
+  const [filter, setFilter] = useState<FilterKey>('all');
+  const [stateMap, setStateMap] = useState<Map<string, PlaybackState>>(new Map());
+
+  useEffect(() => {
+    void getAllPlaybackStates().then((states) =>
+      setStateMap(new Map(states.map((s) => [s.fileId, s]))),
+    );
+  }, [files]);
+
+  const processed = useMemo(() => {
+    const filtered = applyFilter(files, filter, stateMap);
+    return applySort(filtered, sort, stateMap);
+  }, [files, sort, filter, stateMap]);
+
+  const remainingSeconds = useMemo(() => {
+    let total = 0;
+    for (const f of files) {
+      const s = stateMap.get(f.id);
+      if (s && s.duration > 0) total += s.duration - s.position;
+    }
+    return total;
+  }, [files, stateMap]);
+
+  const remainingLabel = useMemo((): string | null => {
+    const m = Math.round(remainingSeconds / 60);
+    if (m < 1) return null;
+    if (m < 60) return `${m} min restantes dans ${sourceFolder}`;
+    const h = Math.floor(m / 60);
+    const r = m % 60;
+    const time = r > 0 ? `${h}h ${r}m` : `${h}h`;
+    return `${time} restantes dans ${sourceFolder}`;
+  }, [remainingSeconds, sourceFolder]);
+
+  const Chip = ({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }): React.JSX.Element => (
+    <button
+      onClick={onClick}
+      className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-colors flex-shrink-0 ${
+        active ? 'bg-accent text-white' : 'bg-white/10 text-white/50 hover:bg-white/20'
+      }`}
+    >
+      {label}
+    </button>
+  );
+
   if (files.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-white/40">
@@ -168,19 +322,47 @@ export function FileList({
 
   return (
     <div>
-      {files.map((file, i) => (
-        <FileItem
-          key={file.id}
-          file={file}
-          isActive={file.id === currentFileId}
-          sourceFolder={sourceFolder}
-          sourceFolderId={sourceFolderId}
-          onPlay={onPlay}
-          onArchive={onArchive}
-          fileIndex={i}
-          isOnline={isOnline}
-        />
-      ))}
+      {/* Sort & filter bar */}
+      <div className="bg-navy-800 border-b border-white/10 px-4 py-2 space-y-2">
+        {remainingLabel && (
+          <p className="text-xs text-white/40">{remainingLabel}</p>
+        )}
+        <div className="flex gap-2 overflow-x-auto scrollbar-none">
+          {(Object.keys(SORT_LABELS) as SortKey[]).map((key) => (
+            <Chip key={key} label={SORT_LABELS[key]} active={sort === key} onClick={() => setSort(key)} />
+          ))}
+        </div>
+        <div className="flex gap-2 overflow-x-auto scrollbar-none">
+          {(Object.keys(FILTER_LABELS) as FilterKey[]).map((key) => (
+            <Chip key={key} label={FILTER_LABELS[key]} active={filter === key} onClick={() => setFilter(key)} />
+          ))}
+        </div>
+      </div>
+
+      {processed.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-12 text-white/40">
+          <p className="text-sm">Aucun fichier pour ce filtre</p>
+          <button onClick={() => setFilter('all')} className="mt-3 text-accent text-sm hover:underline">
+            Voir tous
+          </button>
+        </div>
+      ) : (
+        processed.map((file, i) => (
+          <FileItem
+            key={file.id}
+            file={file}
+            isActive={file.id === currentFileId}
+            sourceFolder={sourceFolder}
+            sourceFolderId={sourceFolderId}
+            onPlay={onPlay}
+            onArchive={onArchive}
+            onAddToQueue={onAddToQueue}
+            fileIndex={i}
+            isOnline={isOnline}
+            playState={stateMap.get(file.id)}
+          />
+        ))
+      )}
     </div>
   );
 }

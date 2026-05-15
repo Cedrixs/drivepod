@@ -1,6 +1,7 @@
 import { getStreamUrl } from '../drive/api';
 import { getOfflineAudioUrl } from '../offline/cache';
 import { saveStateWithSync, flushStateToDrive } from '../state/driveState';
+import { logListeningTime, logFileCompleted } from '../state/listeningStats';
 import { setupMediaSession, updateMediaSessionState, clearMediaSession } from './mediaSession';
 import type { DriveFile } from '../drive/types';
 
@@ -18,6 +19,11 @@ export interface PlayerState {
   error: string | null;
 }
 
+export interface QueuedFile {
+  file: DriveFile;
+  sourceFolder: string;
+}
+
 export type PlayerEvent =
   | { type: 'timeupdate'; position: number; duration: number }
   | { type: 'play' }
@@ -27,7 +33,8 @@ export type PlayerEvent =
   | { type: 'buffering'; value: boolean }
   | { type: 'loaded'; duration: number }
   | { type: 'archive'; fileId: string; fileName: string; sourceFolder: string }
-  | { type: 'trackchange'; file: DriveFile; index: number };
+  | { type: 'trackchange'; file: DriveFile; index: number }
+  | { type: 'queueupdate'; customQueue: QueuedFile[] };
 
 type EventListener = (event: PlayerEvent) => void;
 
@@ -45,12 +52,56 @@ class AudioPlayer {
   private currentIndex = -1;
   skipSeconds = 30;
   private isLoadingNext = false;
+  private autoRewindSeconds = 5;
+  private pausedAt: number | null = null;
+  private static readonly REWIND_THRESHOLD_MS = 30_000;
+  private lastSaveAt: number | null = null;
+  private static readonly MAX_ELAPSED_MS = 60_000;
+
+  private customQueue: QueuedFile[] = [];
+
+  private audioCtx: AudioContext | null = null;
+  private sourceNode: MediaElementAudioSourceNode | null = null;
+  private compressor: DynamicsCompressorNode | null = null;
+  private voiceBoostEnabled = false;
 
   constructor() {
     this.audio = new Audio();
     this.audio.preload = 'auto';
     this.bindAudioEvents();
     this.bindVisibilityEvents();
+  }
+
+  private ensureAudioContext(): void {
+    if (this.audioCtx) return;
+    this.audioCtx = new AudioContext();
+    this.sourceNode = this.audioCtx.createMediaElementSource(this.audio);
+
+    this.compressor = this.audioCtx.createDynamicsCompressor();
+    // Tuned for voice intelligibility
+    this.compressor.threshold.value = -24;
+    this.compressor.knee.value = 10;
+    this.compressor.ratio.value = 4;
+    this.compressor.attack.value = 0.003;
+    this.compressor.release.value = 0.25;
+
+    if (this.voiceBoostEnabled) {
+      this.sourceNode.connect(this.compressor).connect(this.audioCtx.destination);
+    } else {
+      this.sourceNode.connect(this.audioCtx.destination);
+    }
+  }
+
+  setVoiceBoost(enabled: boolean): void {
+    this.voiceBoostEnabled = enabled;
+    if (!this.audioCtx || !this.sourceNode || !this.compressor) return;
+    this.sourceNode.disconnect();
+    this.compressor.disconnect();
+    if (enabled) {
+      this.sourceNode.connect(this.compressor).connect(this.audioCtx.destination);
+    } else {
+      this.sourceNode.connect(this.audioCtx.destination);
+    }
   }
 
   private emit(event: PlayerEvent): void {
@@ -71,6 +122,7 @@ class AudioPlayer {
     });
 
     this.audio.addEventListener('play', () => {
+      this.lastSaveAt = Date.now();
       this.emit({ type: 'play' });
       this.startSaveTimer();
       if (this.currentFile) {
@@ -144,6 +196,7 @@ class AudioPlayer {
     const ratio = pos / dur;
     if (ratio >= ARCHIVE_THRESHOLD && !this.archiveTriggered.has(this.currentFile.id)) {
       this.archiveTriggered.add(this.currentFile.id);
+      void logFileCompleted(this.currentSource);
       this.emit({
         type: 'archive',
         fileId: this.currentFile.id,
@@ -170,6 +223,14 @@ class AudioPlayer {
     const pos = this.audio.currentTime;
     const dur = this.audio.duration || 0;
     if (!dur) return;
+
+    const now = Date.now();
+    if (this.lastSaveAt !== null && !this.audio.paused) {
+      const elapsed = Math.min(now - this.lastSaveAt, AudioPlayer.MAX_ELAPSED_MS);
+      void logListeningTime(this.currentSource, elapsed / 1000);
+    }
+    this.lastSaveAt = now;
+
     await saveStateWithSync({
       fileId: this.currentFile.id,
       position: pos,
@@ -190,7 +251,13 @@ class AudioPlayer {
     this.skipSeconds = seconds;
   }
 
+  setAutoRewind(seconds: number): void {
+    this.autoRewindSeconds = seconds;
+  }
+
   async loadAndPlay(file: DriveFile, sourceFolder: string, startPosition = 0): Promise<void> {
+    this.pausedAt = null;
+    this.lastSaveAt = null;
     this.stopSaveTimer();
     await this.savePosition();
 
@@ -238,10 +305,22 @@ class AudioPlayer {
   }
 
   async play(): Promise<void> {
+    this.ensureAudioContext();
+    if (this.audioCtx?.state === 'suspended') {
+      await this.audioCtx.resume();
+    }
+    if (this.pausedAt !== null && this.autoRewindSeconds > 0) {
+      const elapsed = Date.now() - this.pausedAt;
+      if (elapsed >= AudioPlayer.REWIND_THRESHOLD_MS) {
+        this.skip(-this.autoRewindSeconds);
+      }
+    }
+    this.pausedAt = null;
     try { await this.audio.play(); } catch { /* user gesture required */ }
   }
 
   pause(): void {
+    this.pausedAt = Date.now();
     this.audio.pause();
     this.stopSaveTimer();
     void this.savePosition();
@@ -260,8 +339,36 @@ class AudioPlayer {
     this.audio.playbackRate = speed;
   }
 
+  addToCustomQueue(file: DriveFile, sourceFolder: string): void {
+    this.customQueue.push({ file, sourceFolder });
+    this.emit({ type: 'queueupdate', customQueue: [...this.customQueue] });
+  }
+
+  removeFromCustomQueue(index: number): void {
+    this.customQueue.splice(index, 1);
+    this.emit({ type: 'queueupdate', customQueue: [...this.customQueue] });
+  }
+
+  clearCustomQueue(): void {
+    this.customQueue = [];
+    this.emit({ type: 'queueupdate', customQueue: [] });
+  }
+
+  getCustomQueue(): QueuedFile[] {
+    return [...this.customQueue];
+  }
+
   async playNext(): Promise<void> {
     if (this.isLoadingNext) return;
+    // Custom queue has priority over folder order
+    if (this.customQueue.length > 0) {
+      this.isLoadingNext = true;
+      const next = this.customQueue.shift()!;
+      this.emit({ type: 'queueupdate', customQueue: [...this.customQueue] });
+      this.isLoadingNext = false;
+      await this.loadAndPlay(next.file, next.sourceFolder);
+      return;
+    }
     if (this.currentIndex < this.queue.length - 1) {
       this.isLoadingNext = true;
       this.currentIndex++;

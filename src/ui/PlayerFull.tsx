@@ -1,8 +1,9 @@
-import { useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   PlayIcon, PauseIcon, SkipBackIcon, SkipForwardIcon,
-  ChevronDownIcon, ArchiveIcon,
+  ChevronDownIcon, ArchiveIcon, BookmarkIcon,
 } from './icons';
+import { fetchMarkdownContent, extractSummary } from '../drive/api';
 import type { PlayerHookState } from '../hooks/usePlayer';
 
 interface Props {
@@ -15,8 +16,10 @@ interface Props {
   onSkipBackward: (s: number) => void;
   onSetSpeed: (s: number) => void;
   onArchive: () => void;
+  onCapture: () => void;
   onClose: () => void;
   skipSeconds: number;
+  sourceFolderId?: string;
 }
 
 const SPEEDS = [0.75, 1, 1.25, 1.5, 1.75, 2] as const;
@@ -40,10 +43,22 @@ export function PlayerFull({
   onSkipBackward,
   onSetSpeed,
   onArchive,
+  onCapture,
   onClose,
   skipSeconds,
+  sourceFolderId,
 }: Props): React.JSX.Element | null {
   const { currentFile, isPlaying, position, duration, speed, buffering } = playerState;
+  const [summary, setSummary] = useState<string | null>(null);
+  const [captured, setCaptured] = useState(false);
+
+  useEffect(() => {
+    setSummary(null);
+    if (!currentFile || !sourceFolderId) return;
+    void fetchMarkdownContent(sourceFolderId, currentFile.name).then((md) => {
+      setSummary(md ? extractSummary(md) : null);
+    });
+  }, [currentFile?.id, sourceFolderId]);
 
   const handleSeek = useCallback((e: React.ChangeEvent<HTMLInputElement>): void => {
     onSeek(parseFloat(e.target.value));
@@ -68,9 +83,18 @@ export function PlayerFull({
           <ChevronDownIcon size={24} />
         </button>
         <p className="text-sm font-medium text-white/60 uppercase tracking-wider">En lecture</p>
-        <button onClick={onArchive} className="p-2 text-white/60 hover:text-accent transition-colors">
-          <ArchiveIcon size={20} />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => { onCapture(); setCaptured(true); setTimeout(() => setCaptured(false), 2000); }}
+            className={`p-2 transition-colors ${captured ? 'text-accent' : 'text-white/60 hover:text-accent'}`}
+            title="Capturer ce passage"
+          >
+            <BookmarkIcon size={20} />
+          </button>
+          <button onClick={onArchive} className="p-2 text-white/60 hover:text-accent transition-colors">
+            <ArchiveIcon size={20} />
+          </button>
+        </div>
       </div>
 
       {/* Artwork placeholder */}
@@ -86,6 +110,11 @@ export function PlayerFull({
       {/* Track info */}
       <div className="px-8 py-4">
         <h2 className="text-xl font-bold text-white truncate text-center">{title}</h2>
+        {summary && (
+          <p className="mt-3 text-xs text-white/40 text-center leading-relaxed line-clamp-4">
+            {summary}
+          </p>
+        )}
       </div>
 
       {/* Seek bar */}

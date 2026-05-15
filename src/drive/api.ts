@@ -181,6 +181,147 @@ export async function isFileCached(fileId: string, fileName: string): Promise<bo
   return !!cached;
 }
 
+// ── Markdown summary ─────────────────────────────────────────────────────────
+
+const markdownCache = new Map<string, string | null>();
+
+export function extractSummary(markdown: string, maxSentences = 4): string {
+  const text = markdown
+    .replace(/#{1,6}\s+[^\n]*/g, '')
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/\*(.+?)\*/g, '$1')
+    .replace(/\[(.+?)\]\(.+?\)/g, '$1')
+    .replace(/`(.+?)`/g, '$1')
+    .replace(/^[-*+]\s+/gm, '')
+    .replace(/^\d+\.\s+/gm, '')
+    .replace(/\n+/g, ' ')
+    .trim();
+  const sentences = text.split(/(?<=[.!?])\s+/).filter((s) => s.trim().length > 10);
+  return sentences.slice(0, maxSentences).join(' ').trim();
+}
+
+export async function fetchMarkdownContent(parentFolderId: string, mp3FileName: string): Promise<string | null> {
+  const mdName = mp3FileName.replace(/\.mp3$/i, '.md');
+  const cacheKey = `${parentFolderId}/${mdName}`;
+  if (markdownCache.has(cacheKey)) return markdownCache.get(cacheKey) ?? null;
+
+  const token = await getAccessToken();
+  const q = `name='${mdName}' and '${parentFolderId}' in parents and trashed=false`;
+  const params = new URLSearchParams({ q, fields: 'files(id)', pageSize: '1' });
+
+  const listResp = await fetch(`${BASE}/files?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!listResp.ok) { markdownCache.set(cacheKey, null); return null; }
+
+  const listData = await listResp.json() as { files: { id: string }[] };
+  if (!listData.files.length) { markdownCache.set(cacheKey, null); return null; }
+
+  const contentResp = await fetch(`${BASE}/files/${listData.files[0].id}?alt=media`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!contentResp.ok) { markdownCache.set(cacheKey, null); return null; }
+
+  const text = await contentResp.text();
+  markdownCache.set(cacheKey, text);
+  return text;
+}
+
+// ── Captures (notes) ──────────────────────────────────────────────────────────
+
+export interface CapturedPassage {
+  id: string;
+  fileId: string;
+  fileName: string;
+  sourceFolder: string;
+  audioPosition: number;
+  audioDuration: number;
+  capturedAt: number;
+  passage: string;
+}
+
+export interface NotesFileContent {
+  version: number;
+  captures: CapturedPassage[];
+  lastUpdated: number;
+}
+
+const NOTES_FILE_NAME = '_drivepod_notes.json';
+
+export function extractPassage(markdown: string, position: number, duration: number): string {
+  const text = markdown
+    .replace(/#{1,6}\s+[^\n]*/g, '')
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/\*(.+?)\*/g, '$1')
+    .replace(/\[(.+?)\]\(.+?\)/g, '$1')
+    .replace(/`(.+?)`/g, '$1')
+    .replace(/^[-*+]\s+/gm, '')
+    .replace(/^\d+\.\s+/gm, '')
+    .replace(/\n+/g, ' ')
+    .trim();
+  const words = text.split(/\s+/).filter((w) => w.length > 0);
+  if (!words.length) return '';
+  const ratio = duration > 0 ? Math.min(1, position / duration) : 0;
+  const center = Math.floor(ratio * words.length);
+  const window = 50;
+  return words.slice(Math.max(0, center - window), Math.min(words.length, center + window)).join(' ');
+}
+
+export async function readNotesFile(audioFolderId: string): Promise<NotesFileContent | null> {
+  const token = await getAccessToken();
+  const q = `name='${NOTES_FILE_NAME}' and '${audioFolderId}' in parents and trashed=false`;
+  const params = new URLSearchParams({ q, fields: 'files(id)', pageSize: '1' });
+  const listResp = await fetch(`${BASE}/files?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!listResp.ok) return null;
+  const listData = await listResp.json() as { files: { id: string }[] };
+  if (!listData.files.length) return null;
+  const contentResp = await fetch(`${BASE}/files/${listData.files[0].id}?alt=media`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!contentResp.ok) return null;
+  try { return await contentResp.json() as NotesFileContent; } catch { return null; }
+}
+
+async function writeNotesFile(audioFolderId: string, content: NotesFileContent): Promise<void> {
+  const token = await getAccessToken();
+  const q = `name='${NOTES_FILE_NAME}' and '${audioFolderId}' in parents and trashed=false`;
+  const params = new URLSearchParams({ q, fields: 'files(id)', pageSize: '1' });
+  const listResp = await fetch(`${BASE}/files?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const blob = new Blob([JSON.stringify(content)], { type: 'application/json' });
+  if (listResp.ok) {
+    const listData = await listResp.json() as { files: { id: string }[] };
+    if (listData.files.length > 0) {
+      const patchResp = await fetch(`${UPLOAD_BASE}/files/${listData.files[0].id}?uploadType=media`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: blob,
+      });
+      if (patchResp.ok) return;
+    }
+  }
+  const meta = JSON.stringify({ name: NOTES_FILE_NAME, parents: [audioFolderId] });
+  const form = new FormData();
+  form.append('metadata', new Blob([meta], { type: 'application/json' }));
+  form.append('file', blob);
+  await fetch(`${UPLOAD_BASE}/files?uploadType=multipart`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+}
+
+export async function appendCapture(audioFolderId: string, capture: CapturedPassage): Promise<void> {
+  const existing = await readNotesFile(audioFolderId);
+  const content: NotesFileContent = existing ?? { version: 1, captures: [], lastUpdated: 0 };
+  content.captures.push(capture);
+  content.lastUpdated = Date.now();
+  await writeNotesFile(audioFolderId, content);
+}
+
 export interface StateFileContent {
   version: number;
   files: Record<string, {

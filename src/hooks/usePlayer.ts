@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { player } from '../player/player';
+import { getSettings } from '../state/db';
 import type { DriveFile } from '../drive/types';
-import type { PlayerEvent } from '../player/player';
+import type { PlayerEvent, QueuedFile } from '../player/player';
 
 export interface PlayerHookState {
   currentFile: DriveFile | null;
@@ -13,7 +14,10 @@ export interface PlayerHookState {
   error: string | null;
   currentIndex: number;
   queue: DriveFile[];
+  customQueue: QueuedFile[];
 }
+
+export type { QueuedFile };
 
 const initialState: PlayerHookState = {
   currentFile: null,
@@ -25,6 +29,7 @@ const initialState: PlayerHookState = {
   error: null,
   currentIndex: -1,
   queue: [],
+  customQueue: [],
 };
 
 export function usePlayer(onArchive?: (fileId: string, fileName: string, sourceFolder: string) => void): {
@@ -40,8 +45,20 @@ export function usePlayer(onArchive?: (fileId: string, fileName: string, sourceF
   loadAndPlay: (file: DriveFile, source: string, startPos?: number) => Promise<void>;
   setQueue: (files: DriveFile[], source: string, startIndex?: number) => void;
   setSkipSeconds: (s: number) => void;
+  setAutoRewind: (s: number) => void;
+  setVoiceBoost: (enabled: boolean) => void;
+  addToCustomQueue: (file: DriveFile, sourceFolder: string) => void;
+  removeFromCustomQueue: (index: number) => void;
+  clearCustomQueue: () => void;
 } {
   const [state, setState] = useState<PlayerHookState>(initialState);
+
+  useEffect(() => {
+    void getSettings().then((s) => {
+      player.setAutoRewind(s.autoRewindSeconds);
+      player.setVoiceBoost(s.voiceBoost);
+    });
+  }, []);
 
   useEffect(() => {
     const off = player.on((event: PlayerEvent) => {
@@ -77,6 +94,9 @@ export function usePlayer(onArchive?: (fileId: string, fileName: string, sourceF
         case 'archive':
           onArchive?.(event.fileId, event.fileName, event.sourceFolder);
           break;
+        case 'queueupdate':
+          setState((s) => ({ ...s, customQueue: event.customQueue }));
+          break;
       }
     });
     return off;
@@ -104,5 +124,10 @@ export function usePlayer(onArchive?: (fileId: string, fileName: string, sourceF
     loadAndPlay,
     setQueue,
     setSkipSeconds: (s: number) => { player.skipSeconds = s; },
+    setAutoRewind: (s: number) => { player.setAutoRewind(s); },
+    setVoiceBoost: (enabled: boolean) => { player.setVoiceBoost(enabled); },
+    addToCustomQueue: (file: DriveFile, sourceFolder: string) => { player.addToCustomQueue(file, sourceFolder); },
+    removeFromCustomQueue: (index: number) => { player.removeFromCustomQueue(index); },
+    clearCustomQueue: () => { player.clearCustomQueue(); },
   };
 }

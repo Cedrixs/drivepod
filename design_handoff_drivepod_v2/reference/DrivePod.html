@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DrivePod — Design System</title>
+  <link rel="stylesheet" href="design-system.css" />
+  <style>
+    html, body { margin: 0; padding: 0; background: #f0eee9; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  </style>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel" src="design-canvas.jsx"></script>
+  <script type="text/babel" src="components/icons.jsx"></script>
+  <script type="text/babel" src="screens/onboarding.jsx"></script>
+  <script type="text/babel" src="screens/main-list.jsx"></script>
+  <script type="text/babel" src="screens/player.jsx"></script>
+  <script type="text/babel" src="screens/dashboard-settings.jsx"></script>
+  <script type="text/babel" src="screens/desktop.jsx"></script>
+  <script type="text/babel" src="screens/player-v2.jsx"></script>
+  <script type="text/babel" src="screens/design-system.jsx"></script>
+
+  <script type="text/babel">
+    const App = () => (
+      <DesignCanvas>
+
+        <DCSection id="overview" title="DrivePod" subtitle="PWA lecteur audio · IBM Plex · ambre warm-neutral · dark first">
+          <DCArtboard id="splash"  label="Splash / Loader" width={375} height={812}>
+            <SplashScreen />
+          </DCArtboard>
+          <DCArtboard id="login"   label="Login" width={375} height={812}>
+            <LoginScreen />
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="mobile-dark" title="Mobile · Dark" subtitle="375 × 812 — thème par défaut (écoute du soir)">
+          <DCArtboard id="list-dark"      label="Main list" width={375} height={812}>
+            <MainListScreen theme="dark" />
+          </DCArtboard>
+          <DCArtboard id="list-offline"   label="Main list · hors-ligne" width={375} height={812}>
+            <MainListScreen theme="dark" offline />
+          </DCArtboard>
+          <DCArtboard id="search"         label="Recherche" width={375} height={812}>
+            <SearchScreen theme="dark" />
+          </DCArtboard>
+          <DCArtboard id="player-dark"    label="Player plein écran" width={375} height={812}>
+            <PlayerScreen theme="dark" />
+          </DCArtboard>
+          <DCArtboard id="player-capture" label="Player · capture passage" width={375} height={812}>
+            <PlayerScreen theme="dark" showCaptured />
+          </DCArtboard>
+          <DCArtboard id="player-collapsed" label="Player · résumé replié" width={375} height={812}>
+            <PlayerScreen theme="dark" showSummary={false} />
+          </DCArtboard>
+          <DCArtboard id="queue"          label="File d'écoute" width={375} height={812}>
+            <QueueScreen theme="dark" />
+          </DCArtboard>
+          <DCArtboard id="dashboard"      label="Tableau de bord" width={375} height={812}>
+            <DashboardScreen theme="dark" />
+          </DCArtboard>
+          <DCArtboard id="settings"       label="Paramètres" width={375} height={812}>
+            <SettingsScreen theme="dark" />
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="mobile-light" title="Mobile · Light" subtitle="375 × 812 — alternative pour lumière forte">
+          <DCArtboard id="list-light"   label="Main list · light" width={375} height={812}>
+            <MainListScreen theme="light" />
+          </DCArtboard>
+          <DCArtboard id="player-light" label="Player · light" width={375} height={812}>
+            <PlayerScreen theme="light" />
+          </DCArtboard>
+          <DCArtboard id="settings-light" label="Paramètres · light" width={375} height={812}>
+            <SettingsScreen theme="light" />
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="desktop-dark" title="Desktop · Dark" subtitle="1440 × 900 — 3 colonnes (nav · liste · player)">
+          <DCArtboard id="desktop-list" label="Main list · 3 colonnes" width={1440} height={900}>
+            <DesktopListScreen theme="dark" />
+          </DCArtboard>
+          <DCArtboard id="desktop-dash" label="Tableau de bord" width={1440} height={900}>
+            <DesktopDashboardScreen theme="dark" />
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="desktop-light" title="Desktop · Light" subtitle="1440 × 900">
+          <DCArtboard id="desktop-list-light" label="Main list · light" width={1440} height={900}>
+            <DesktopListScreen theme="light" />
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="v2-sans-artwork" title="V2 · Sans artwork" subtitle="L'artwork est remplacé par : passage en cours (karaoké) + métriques de lecture">
+          <DCArtboard id="v2-list"      label="Main list · v2" width={375} height={812}>
+            <MainListScreenV2 theme="dark" />
+          </DCArtboard>
+          <DCArtboard id="v2-player"    label="Player · v2" width={375} height={812}>
+            <PlayerScreenV2 theme="dark" />
+          </DCArtboard>
+          <DCArtboard id="v2-capture"   label="Player · v2 capture" width={375} height={812}>
+            <PlayerScreenV2 theme="dark" showCaptured />
+          </DCArtboard>
+          <DCArtboard id="v2-player-light" label="Player · v2 light" width={375} height={812}>
+            <PlayerScreenV2 theme="light" />
+          </DCArtboard>
+          <DCArtboard id="v2-desktop"   label="Desktop · v2" width={1440} height={900}>
+            <DesktopListScreenV2 theme="dark" />
+          </DCArtboard>
+          <DCArtboard id="v2-desktop-light" label="Desktop · v2 light" width={1440} height={900}>
+            <DesktopListScreenV2 theme="light" />
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="system" title="Design System" subtitle="Tokens, typo, composants, états, micro-interactions">
+          <DCArtboard id="ds-dark"  label="Référence · dark"  width={1440} height={1900}>
+            <DesignSystemPage theme="dark" />
+          </DCArtboard>
+          <DCArtboard id="ds-light" label="Référence · light" width={1440} height={1900}>
+            <DesignSystemPage theme="light" />
+          </DCArtboard>
+        </DCSection>
+
+      </DesignCanvas>
+    );
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

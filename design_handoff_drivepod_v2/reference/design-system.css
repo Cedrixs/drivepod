@@ -1,0 +1,247 @@
+/* ─────────────────────────────────────────────────────────────
+   DrivePod — Design System Tokens
+   Studious audio reader, Pocket Casts / Overcast genre.
+   IBM Plex Sans + IBM Plex Mono. Warm-neutral palette,
+   single amber accent (reading-lamp light).
+   ───────────────────────────────────────────────────────────── */
+
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+/* ── DARK (default) ────────────────────────────────────────── */
+.dp, .dp-dark {
+  /* Surfaces */
+  --bg:            oklch(0.16 0.006 60);   /* app background  */
+  --surface-1:     oklch(0.20 0.006 60);   /* cards           */
+  --surface-2:     oklch(0.24 0.006 60);   /* raised / hover  */
+  --surface-3:     oklch(0.28 0.006 60);   /* chips, inputs   */
+  --overlay:       oklch(0.10 0.006 60 / 0.72);
+
+  /* Text */
+  --text-1:        oklch(0.96 0.005 75);   /* primary         */
+  --text-2:        oklch(0.78 0.008 75);   /* secondary       */
+  --text-3:        oklch(0.58 0.010 75);   /* tertiary / meta */
+  --text-4:        oklch(0.42 0.010 75);   /* disabled        */
+
+  /* Strokes */
+  --border-1:      oklch(0.30 0.008 60);
+  --border-2:      oklch(0.36 0.008 60);
+  --focus:         oklch(0.78 0.09 75);
+
+  /* Accent (warm amber — single brand color) */
+  --accent:        oklch(0.78 0.09 75);
+  --accent-soft:   oklch(0.78 0.09 75 / 0.16);
+  --accent-press:  oklch(0.72 0.10 70);
+  --accent-text:   oklch(0.18 0.010 60);   /* text on amber  */
+
+  /* States */
+  --success:       oklch(0.72 0.09 155);
+  --warning:       oklch(0.80 0.10 80);
+  --danger:        oklch(0.68 0.13 25);
+
+  --shadow-1: 0 1px 2px rgba(0,0,0,.40), 0 2px 8px rgba(0,0,0,.18);
+  --shadow-2: 0 8px 28px rgba(0,0,0,.45), 0 2px 6px rgba(0,0,0,.25);
+}
+
+/* ── LIGHT ─────────────────────────────────────────────────── */
+.dp-light {
+  --bg:            oklch(0.985 0.004 75);
+  --surface-1:     oklch(1.000 0.000 0);
+  --surface-2:     oklch(0.965 0.005 75);
+  --surface-3:     oklch(0.935 0.006 75);
+  --overlay:       oklch(0.20 0.006 60 / 0.45);
+
+  --text-1:        oklch(0.20 0.010 60);
+  --text-2:        oklch(0.40 0.008 60);
+  --text-3:        oklch(0.55 0.008 60);
+  --text-4:        oklch(0.70 0.008 60);
+
+  --border-1:      oklch(0.90 0.005 75);
+  --border-2:      oklch(0.82 0.006 75);
+  --focus:         oklch(0.55 0.12 60);
+
+  --accent:        oklch(0.55 0.12 60);     /* slightly deeper amber in light */
+  --accent-soft:   oklch(0.55 0.12 60 / 0.10);
+  --accent-press:  oklch(0.48 0.13 58);
+  --accent-text:   oklch(0.99 0.005 75);
+
+  --success:       oklch(0.55 0.13 155);
+  --warning:       oklch(0.62 0.13 75);
+  --danger:        oklch(0.55 0.18 25);
+
+  --shadow-1: 0 1px 2px rgba(60,40,20,.06), 0 2px 8px rgba(60,40,20,.04);
+  --shadow-2: 0 8px 28px rgba(60,40,20,.10), 0 2px 6px rgba(60,40,20,.06);
+}
+
+/* ── Type scale ────────────────────────────────────────────── */
+.dp {
+  --font-sans: 'IBM Plex Sans', -apple-system, system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+  /* Mobile-first sizes (44+ touch targets) */
+  --t-display: 32px / 1.15 var(--font-sans);   /* big titles    */
+  --t-title:   22px / 1.25 var(--font-sans);   /* screen title  */
+  --t-h1:      19px / 1.30 var(--font-sans);   /* file title    */
+  --t-body:    16px / 1.45 var(--font-sans);
+  --t-label:   14px / 1.30 var(--font-sans);
+  --t-meta:    13px / 1.30 var(--font-sans);
+  --t-micro:   11px / 1.25 var(--font-sans);
+  --t-mono-m:  13px / 1.30 var(--font-mono);
+  --t-mono-s:  11px / 1.25 var(--font-mono);
+
+  /* Radii */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 20px;
+  --r-pill: 9999px;
+
+  /* Spacing scale (4px base) */
+  --s-1: 4px;  --s-2: 8px;  --s-3: 12px;  --s-4: 16px;
+  --s-5: 20px; --s-6: 24px; --s-7: 32px;  --s-8: 40px;
+  --s-9: 56px; --s-10: 72px;
+
+  /* Motion */
+  --ease: cubic-bezier(.2,.7,.3,1);
+  --d-fast: 140ms;
+  --d-med:  220ms;
+  --d-slow: 360ms;
+}
+
+/* ── Base resets scoped to .dp ─────────────────────────────── */
+.dp {
+  font-family: var(--font-sans);
+  font-feature-settings: 'ss01','cv11';
+  color: var(--text-1);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  box-sizing: border-box;
+}
+.dp *, .dp *::before, .dp *::after { box-sizing: border-box; }
+.dp button { font-family: inherit; cursor: pointer; border: 0; background: transparent; color: inherit; padding: 0; }
+
+/* ── Reusable primitives ────────────────────────────────────── */
+
+/* Status bar (PWA, generic — not iOS specific) */
+.dp-status {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 20px 8px;
+  font: 500 14px/1 var(--font-sans);
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+.dp-status .dp-status-right { display: flex; gap: 6px; align-items: center; }
+
+/* Phone frame */
+.dp-phone {
+  width: 375px; height: 812px;
+  background: var(--bg);
+  overflow: hidden;
+  position: relative;
+  display: flex; flex-direction: column;
+}
+
+/* Buttons */
+.dp-btn {
+  height: 48px; padding: 0 20px; border-radius: var(--r-md);
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  font: 500 15px/1 var(--font-sans);
+  transition: background var(--d-fast) var(--ease), transform var(--d-fast) var(--ease);
+}
+.dp-btn-primary { background: var(--accent); color: var(--accent-text); }
+.dp-btn-primary:hover { background: var(--accent-press); }
+.dp-btn-primary:active { transform: scale(.98); }
+.dp-btn-secondary { background: var(--surface-2); color: var(--text-1); }
+.dp-btn-secondary:hover { background: var(--surface-3); }
+.dp-btn-ghost { color: var(--text-2); }
+.dp-btn-ghost:hover { background: var(--surface-2); color: var(--text-1); }
+
+/* Chips */
+.dp-chip {
+  height: 30px; padding: 0 12px; border-radius: var(--r-pill);
+  display: inline-flex; align-items: center; gap: 6px;
+  font: 500 13px/1 var(--font-sans);
+  background: var(--surface-2); color: var(--text-2);
+  transition: background var(--d-fast) var(--ease), color var(--d-fast) var(--ease);
+}
+.dp-chip:hover { background: var(--surface-3); color: var(--text-1); }
+.dp-chip-active { background: var(--accent-soft); color: var(--accent); }
+.dp-chip .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .7; }
+
+/* Icon button */
+.dp-icon-btn {
+  width: 44px; height: 44px; border-radius: var(--r-md);
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--text-2);
+  transition: background var(--d-fast) var(--ease), color var(--d-fast) var(--ease);
+}
+.dp-icon-btn:hover { background: var(--surface-2); color: var(--text-1); }
+.dp-icon-btn-sm { width: 36px; height: 36px; border-radius: var(--r-sm); }
+
+/* Progress bar (used in list rows and mini-player) */
+.dp-progress {
+  height: 2px; background: var(--surface-3); border-radius: 1px; overflow: hidden;
+}
+.dp-progress > i { display: block; height: 100%; background: var(--accent); border-radius: 1px; }
+
+/* Logo placeholder block */
+.dp-logo {
+  background: var(--surface-2);
+  border: 1px dashed var(--border-2);
+  border-radius: 18px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font: 600 12px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  color: var(--text-3);
+}
+
+/* Document artwork placeholder (player) */
+.dp-artwork {
+  background:
+    repeating-linear-gradient(135deg,
+      oklch(from var(--surface-2) calc(l + 0.02) c h) 0 8px,
+      var(--surface-2) 8px 16px);
+  border-radius: var(--r-lg);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-3);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Card */
+.dp-card {
+  background: var(--surface-1);
+  border-radius: var(--r-lg);
+  border: 1px solid var(--border-1);
+}
+
+/* Number ticker glyph (file order) */
+.dp-num {
+  font: 500 12px/1 var(--font-mono);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+
+/* Generic SVG icon — currentColor */
+.dp svg.icon { display: block; }
+
+/* Scrollbar hide for scrollable rails */
+.dp-rail { overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.dp-rail::-webkit-scrollbar { display: none; }
+
+/* PWA home indicator (subtle) */
+.dp-home-ind {
+  position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%);
+  width: 134px; height: 4px; border-radius: 2px;
+  background: oklch(from var(--text-1) l c h / 0.30);
+}
+
+/* Focus ring (keyboard) */
+.dp :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 4px; }
+
+/* No-motion */
+@media (prefers-reduced-motion: reduce) {
+  .dp *, .dp *::before, .dp *::after { transition: none !important; animation: none !important; }
+}

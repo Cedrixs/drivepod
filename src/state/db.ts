@@ -43,7 +43,7 @@ let dbPromise: Promise<IDBPDatabase> | null = null;
 
 export function getDB(): Promise<IDBPDatabase> {
   if (!dbPromise) {
-    dbPromise = openDB('drivepod', 2, {
+    dbPromise = openDB('drivepod', 3, {
       upgrade(db, oldVersion) {
         if (oldVersion < 1) {
           db.createObjectStore('tokens');
@@ -61,6 +61,11 @@ export function getDB(): Promise<IDBPDatabase> {
             const fileCacheStore = db.createObjectStore('fileCache', { keyPath: 'fileId' });
             fileCacheStore.createIndex('by-source', 'sourceFolder');
             fileCacheStore.createIndex('by-cached', 'cachedAt');
+          }
+        }
+        if (oldVersion < 3) {
+          if (!db.objectStoreNames.contains('listeningLog')) {
+            db.createObjectStore('listeningLog');
           }
         }
       },

@@ -2,22 +2,31 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { AuthScreen } from './ui/AuthButton';
 import { SourceTabs } from './ui/SourceTabs';
 import { FileList } from './ui/FileList';
+import { QueueList } from './ui/QueueList';
+import { SearchBar } from './ui/SearchBar';
+import { CapturesList } from './ui/CapturesList';
 import { PlayerBar } from './ui/PlayerBar';
 import { PlayerFull } from './ui/PlayerFull';
 import { Settings } from './ui/Settings';
 import { OfflineBanner } from './ui/OfflineBanner';
-import { SettingsIcon, RefreshIcon } from './ui/icons';
+import { SettingsIcon, RefreshIcon, SearchIcon } from './ui/icons';
+import { Dashboard } from './ui/Dashboard';
 import { useApp } from './hooks/useApp';
 import { usePlayer } from './hooks/usePlayer';
 import { useOnline } from './hooks/useOnline';
 import { getLocalPlaybackState } from './state/driveState';
 import { getSettings } from './state/db';
+import { fetchMarkdownContent, extractPassage, appendCapture } from './drive/api';
 import type { DriveFile } from './drive/types';
 
 export default function App(): React.JSX.Element {
   const online = useOnline();
   const [playerOpen, setPlayerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [queueTabActive, setQueueTabActive] = useState(false);
+  const [statsTabActive, setStatsTabActive] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [capturesOpen, setCapturesOpen] = useState(false);
 
   // Ref to archiveFile so the player callback can access it without stale closure
   const archiveFileRef = useRef<
@@ -32,6 +41,11 @@ export default function App(): React.JSX.Element {
   );
 
   const { state: playerState, ...playerActions } = usePlayer(handleArchiveFromPlayer);
+
+  // Auto-deactivate queue tab when queue empties
+  useEffect(() => {
+    if (playerState.customQueue.length === 0) setQueueTabActive(false);
+  }, [playerState.customQueue.length]);
 
   const { state: appState, refresh, archiveFile, setActiveSource, refreshQueueCount } = useApp(online);
 
@@ -65,6 +79,44 @@ export default function App(): React.JSX.Element {
     await refreshQueueCount();
   }, [appState.sources, archiveFile, refreshQueueCount]);
 
+  const handleCapture = useCallback(async (): Promise<void> => {
+    const file = playerState.currentFile;
+    const audioFolderId = appState.audioFolderId;
+    if (!file || !audioFolderId) return;
+
+    const { position, duration } = playerState;
+    const source = appState.sources.find((s) => s.files.some((f) => f.id === file.id));
+    const sourceFolderId = source?.folder.id ?? '';
+
+    const md = sourceFolderId ? await fetchMarkdownContent(sourceFolderId, file.name) : null;
+    const passage = md ? extractPassage(md, position, duration) : '';
+
+    await appendCapture(audioFolderId, {
+      id: `${file.id}-${Date.now()}`,
+      fileId: file.id,
+      fileName: file.name,
+      sourceFolder: source?.folder.name ?? '',
+      audioPosition: position,
+      audioDuration: duration,
+      capturedAt: Date.now(),
+      passage,
+    });
+  }, [playerState, appState.audioFolderId, appState.sources]);
+
+  const handlePlayFromSearch = useCallback(async (file: DriveFile, source: typeof appState.sources[number], fileIndex: number): Promise<void> => {
+    const sourceIndex = appState.sources.indexOf(source);
+    if (sourceIndex >= 0) setActiveSource(sourceIndex);
+    setQueueTabActive(false);
+
+    const settings = await getSettings();
+    playerActions.setQueue(source.files, source.folder.name, fileIndex);
+    playerActions.setSpeed(settings.defaultSpeed);
+    playerActions.setSkipSeconds(settings.skipForwardSeconds);
+
+    const savedState = await getLocalPlaybackState(file.id);
+    await playerActions.loadAndPlay(file, source.folder.name, savedState?.position ?? 0);
+  }, [appState.sources, playerActions, setActiveSource]);
+
   const handleArchiveCurrentPlaying = useCallback(async (): Promise<void> => {
     const file = playerState.currentFile;
     if (!file) return;
@@ -89,6 +141,9 @@ export default function App(): React.JSX.Element {
   }
 
   const activeSource = appState.sources[appState.activeSourceIndex];
+  const currentFileSource = appState.sources.find(
+    (s) => s.files.some((f) => f.id === playerState.currentFile?.id),
+  );
 
   return (
     <div className="min-h-screen bg-navy-900 flex flex-col text-white" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
@@ -97,7 +152,14 @@ export default function App(): React.JSX.Element {
       {/* Header */}
       <header className="flex items-center justify-between px-4 py-3 bg-navy-800 border-b border-white/10">
         <h1 className="text-lg font-bold text-white">DrivePod</h1>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setSearchOpen(true)}
+            className="p-2 text-white/60 hover:text-white transition-colors"
+            title="Rechercher"
+          >
+            <SearchIcon size={20} />
+          </button>
           <button
             onClick={() => void refresh()}
             disabled={appState.loading}
@@ -119,7 +181,12 @@ export default function App(): React.JSX.Element {
       <SourceTabs
         sources={appState.sources}
         activeIndex={appState.activeSourceIndex}
-        onSelect={setActiveSource}
+        onSelect={(i) => { setQueueTabActive(false); setStatsTabActive(false); setActiveSource(i); }}
+        queueCount={playerState.customQueue.length}
+        queueActive={queueTabActive}
+        onQueueSelect={() => { setStatsTabActive(false); setQueueTabActive(true); }}
+        statsActive={statsTabActive}
+        onStatsSelect={() => { setQueueTabActive(false); setStatsTabActive(true); }}
       />
 
       {/* File list */}
@@ -136,6 +203,23 @@ export default function App(): React.JSX.Element {
           <div className="flex items-center justify-center py-16">
             <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
           </div>
+        ) : statsTabActive ? (
+          <Dashboard />
+        ) : queueTabActive ? (
+          <QueueList
+            queue={playerState.customQueue}
+            currentFileId={playerState.currentFile?.id ?? null}
+            onRemove={playerActions.removeFromCustomQueue}
+            onClear={() => { playerActions.clearCustomQueue(); setQueueTabActive(false); }}
+            onPlayNow={async (item, index) => {
+              playerActions.removeFromCustomQueue(index);
+              const savedState = await getLocalPlaybackState(item.file.id);
+              const settings = await getSettings();
+              playerActions.setSpeed(settings.defaultSpeed);
+              playerActions.setSkipSeconds(settings.skipForwardSeconds);
+              await playerActions.loadAndPlay(item.file, item.sourceFolder, savedState?.position ?? 0);
+            }}
+          />
         ) : activeSource ? (
           <FileList
             files={activeSource.files}
@@ -144,6 +228,9 @@ export default function App(): React.JSX.Element {
             currentFileId={playerState.currentFile?.id ?? null}
             onPlay={(file, index) => void handlePlayFile(file, index)}
             onArchive={(file) => void handleArchive(file)}
+            onAddToQueue={(file) => {
+              playerActions.addToCustomQueue(file, activeSource.folder.name);
+            }}
             isOnline={online}
             onRefresh={() => void refresh()}
           />
@@ -183,8 +270,27 @@ export default function App(): React.JSX.Element {
           onSkipBackward={playerActions.skipBackward}
           onSetSpeed={playerActions.setSpeed}
           onArchive={() => void handleArchiveCurrentPlaying()}
+          onCapture={() => void handleCapture()}
           onClose={() => setPlayerOpen(false)}
           skipSeconds={player_skipSeconds()}
+          sourceFolderId={currentFileSource?.folder.id}
+        />
+      )}
+
+      {/* Captures */}
+      {capturesOpen && appState.audioFolderId && (
+        <CapturesList
+          audioFolderId={appState.audioFolderId}
+          onClose={() => setCapturesOpen(false)}
+        />
+      )}
+
+      {/* Search */}
+      {searchOpen && (
+        <SearchBar
+          sources={appState.sources}
+          onPlay={(file, source, fileIndex) => void handlePlayFromSearch(file, source, fileIndex)}
+          onClose={() => setSearchOpen(false)}
         />
       )}
 
@@ -194,6 +300,12 @@ export default function App(): React.JSX.Element {
           onClose={() => setSettingsOpen(false)}
           audioFolderId={appState.audioFolderId}
           onResync={() => void refresh()}
+          onShowCaptures={() => { setSettingsOpen(false); setCapturesOpen(true); }}
+          onSettingsChange={(key, value) => {
+            if (key === 'autoRewindSeconds') playerActions.setAutoRewind(value as number);
+            if (key === 'skipForwardSeconds' || key === 'skipBackwardSeconds') playerActions.setSkipSeconds(value as number);
+            if (key === 'voiceBoost') playerActions.setVoiceBoost(value as boolean);
+          }}
         />
       )}
     </div>
