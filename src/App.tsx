@@ -10,6 +10,7 @@ import { PlayerFull } from './ui/PlayerFull';
 import { Settings } from './ui/Settings';
 import { OfflineBanner } from './ui/OfflineBanner';
 import { SettingsIcon, RefreshIcon, SearchIcon } from './ui/icons';
+import { Dashboard } from './ui/Dashboard';
 import { useApp } from './hooks/useApp';
 import { usePlayer } from './hooks/usePlayer';
 import { useOnline } from './hooks/useOnline';
@@ -23,6 +24,7 @@ export default function App(): React.JSX.Element {
   const [playerOpen, setPlayerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [queueTabActive, setQueueTabActive] = useState(false);
+  const [statsTabActive, setStatsTabActive] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [capturesOpen, setCapturesOpen] = useState(false);
 
@@ -179,10 +181,12 @@ export default function App(): React.JSX.Element {
       <SourceTabs
         sources={appState.sources}
         activeIndex={appState.activeSourceIndex}
-        onSelect={(i) => { setQueueTabActive(false); setActiveSource(i); }}
+        onSelect={(i) => { setQueueTabActive(false); setStatsTabActive(false); setActiveSource(i); }}
         queueCount={playerState.customQueue.length}
         queueActive={queueTabActive}
-        onQueueSelect={() => setQueueTabActive(true)}
+        onQueueSelect={() => { setStatsTabActive(false); setQueueTabActive(true); }}
+        statsActive={statsTabActive}
+        onStatsSelect={() => { setQueueTabActive(false); setStatsTabActive(true); }}
       />
 
       {/* File list */}
@@ -199,6 +203,8 @@ export default function App(): React.JSX.Element {
           <div className="flex items-center justify-center py-16">
             <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
           </div>
+        ) : statsTabActive ? (
+          <Dashboard />
         ) : queueTabActive ? (
           <QueueList
             queue={playerState.customQueue}
