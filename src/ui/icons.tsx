@@ -7,10 +7,10 @@ function Icon({ size = 24, strokeWidth = 1.75, ...props }: IconProps): React.JSX
 }
 
 export function PlayIcon(p: IconProps): React.JSX.Element {
-  return <Icon {...p}><polygon points="5 3 19 12 5 21 5 3" /></Icon>;
+  return <Icon {...p}><path d="M7 5v14l12-7z" fill="currentColor" stroke="none"/></Icon>;
 }
 export function PauseIcon(p: IconProps): React.JSX.Element {
-  return <Icon {...p}><rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" /></Icon>;
+  return <Icon {...p}><rect x="6.5" y="5" width="3.5" height="14" rx="0.6" fill="currentColor" stroke="none"/><rect x="14" y="5" width="3.5" height="14" rx="0.6" fill="currentColor" stroke="none"/></Icon>;
 }
 export function SkipBackIcon(p: IconProps): React.JSX.Element {
   return <Icon {...p}><polygon points="19 20 9 12 19 4 19 20" /><line x1="5" y1="19" x2="5" y2="5" /></Icon>;

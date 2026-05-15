@@ -221,7 +221,7 @@ export default function App(): React.JSX.Element {
       {/* File list */}
       <div
         className="flex-1 overflow-y-auto"
-        style={{ paddingBottom: playerState.currentFile ? '80px' : '0' }}
+        style={{ paddingBottom: playerState.currentFile ? 'calc(80px + env(safe-area-inset-bottom))' : '0' }}
       >
         {appState.error && (
           <div className="mx-4 mt-4 p-3 bg-red-500/20 border border-red-500/40 rounded-xl text-red-300 text-sm">
@@ -270,19 +270,16 @@ export default function App(): React.JSX.Element {
         )}
       </div>
 
-      {/* Mini player */}
+      {/* Mini player V2 */}
       {playerState.currentFile && !playerOpen && (
-        <div className="fixed bottom-0 left-0 right-0 z-40">
-          <PlayerBar
-            playerState={playerState}
-            onPlayPause={() =>
-              playerState.isPlaying ? playerActions.pause() : void playerActions.play()
-            }
-            onNext={() => void playerActions.playNext()}
-            onExpand={() => setPlayerOpen(true)}
-            skipSeconds={player_skipSeconds()}
-          />
-        </div>
+        <PlayerBar
+          playerState={playerState}
+          sourceFolder={currentFileSource?.folder.name}
+          onPlayPause={() =>
+            playerState.isPlaying ? playerActions.pause() : void playerActions.play()
+          }
+          onExpand={() => setPlayerOpen(true)}
+        />
       )}
 
       {/* Full player */}
