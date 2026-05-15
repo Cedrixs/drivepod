@@ -1,9 +1,64 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { DownloadIcon, ArchiveIcon, PlayIcon, CheckIcon } from './icons';
 import { downloadForOffline, checkCached } from '../offline/cache';
-import type { DriveFile } from '../drive/types';
-import type { PlaybackState } from '../drive/types';
-import { getPlaybackState } from '../state/db';
+import { getAllPlaybackStates } from '../state/db';
+import type { DriveFile, PlaybackState } from '../drive/types';
+
+// ── Sort & filter types ──────────────────────────────────────────────────────
+
+type SortKey = 'date-asc' | 'date-desc' | 'duration' | 'progress';
+type FilterKey = 'all' | 'not-started' | 'in-progress' | 'almost-done';
+
+const SORT_LABELS: Record<SortKey, string> = {
+  'date-asc': 'Date ↑',
+  'date-desc': 'Date ↓',
+  duration: 'Durée',
+  progress: 'Progression',
+};
+
+const FILTER_LABELS: Record<FilterKey, string> = {
+  all: 'Tous',
+  'not-started': 'Non commencés',
+  'in-progress': 'À reprendre',
+  'almost-done': 'Presque finis',
+};
+
+function getProgress(state: PlaybackState | undefined): number {
+  if (!state || !state.duration) return 0;
+  return state.position / state.duration;
+}
+
+function applySort(files: DriveFile[], sort: SortKey, states: Map<string, PlaybackState>): DriveFile[] {
+  const sorted = [...files];
+  switch (sort) {
+    case 'date-asc':
+      return sorted.sort((a, b) => a.createdTime.localeCompare(b.createdTime));
+    case 'date-desc':
+      return sorted.sort((a, b) => b.createdTime.localeCompare(a.createdTime));
+    case 'duration':
+      return sorted.sort((a, b) => {
+        const da = states.get(a.id)?.duration ?? -1;
+        const db = states.get(b.id)?.duration ?? -1;
+        return db - da; // longest first; unknowns (-1) go last
+      });
+    case 'progress':
+      return sorted.sort((a, b) => getProgress(states.get(b.id)) - getProgress(states.get(a.id)));
+  }
+}
+
+function applyFilter(files: DriveFile[], filter: FilterKey, states: Map<string, PlaybackState>): DriveFile[] {
+  if (filter === 'all') return files;
+  return files.filter((f) => {
+    const p = getProgress(states.get(f.id));
+    switch (filter) {
+      case 'not-started': return p === 0;
+      case 'in-progress': return p > 0 && p < 0.95;
+      case 'almost-done': return p >= 0.8 && p < 0.95;
+    }
+  });
+}
+
+// ── FileItem ─────────────────────────────────────────────────────────────────
 
 interface FileItemProps {
   file: DriveFile;
@@ -14,6 +69,7 @@ interface FileItemProps {
   onArchive: (file: DriveFile) => void;
   fileIndex: number;
   isOnline: boolean;
+  playState: PlaybackState | undefined;
 }
 
 function formatDuration(seconds: number): string {
@@ -40,14 +96,13 @@ function FileItem({
   onArchive,
   fileIndex,
   isOnline,
+  playState,
 }: FileItemProps): React.JSX.Element {
   const [cached, setCached] = useState(false);
   const [downloading, setDownloading] = useState(false);
-  const [playState, setPlayState] = useState<PlaybackState | null>(null);
 
   useEffect(() => {
     void checkCached(file.id, file.name).then(setCached);
-    void getPlaybackState(file.id).then((s) => setPlayState(s ?? null));
   }, [file.id, file.name]);
 
   const handleDownload = useCallback(async (e: React.MouseEvent): Promise<void> => {
@@ -134,6 +189,8 @@ function FileItem({
   );
 }
 
+// ── FileList ─────────────────────────────────────────────────────────────────
+
 interface FileListProps {
   files: DriveFile[];
   sourceFolder: string;
@@ -155,6 +212,32 @@ export function FileList({
   isOnline,
   onRefresh,
 }: FileListProps): React.JSX.Element {
+  const [sort, setSort] = useState<SortKey>('date-asc');
+  const [filter, setFilter] = useState<FilterKey>('all');
+  const [stateMap, setStateMap] = useState<Map<string, PlaybackState>>(new Map());
+
+  useEffect(() => {
+    void getAllPlaybackStates().then((states) =>
+      setStateMap(new Map(states.map((s) => [s.fileId, s]))),
+    );
+  }, [files]);
+
+  const processed = useMemo(() => {
+    const filtered = applyFilter(files, filter, stateMap);
+    return applySort(filtered, sort, stateMap);
+  }, [files, sort, filter, stateMap]);
+
+  const Chip = ({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }): React.JSX.Element => (
+    <button
+      onClick={onClick}
+      className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-colors flex-shrink-0 ${
+        active ? 'bg-accent text-white' : 'bg-white/10 text-white/50 hover:bg-white/20'
+      }`}
+    >
+      {label}
+    </button>
+  );
+
   if (files.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-white/40">
@@ -168,19 +251,43 @@ export function FileList({
 
   return (
     <div>
-      {files.map((file, i) => (
-        <FileItem
-          key={file.id}
-          file={file}
-          isActive={file.id === currentFileId}
-          sourceFolder={sourceFolder}
-          sourceFolderId={sourceFolderId}
-          onPlay={onPlay}
-          onArchive={onArchive}
-          fileIndex={i}
-          isOnline={isOnline}
-        />
-      ))}
+      {/* Sort & filter bar */}
+      <div className="bg-navy-800 border-b border-white/10 px-4 py-2 space-y-2">
+        <div className="flex gap-2 overflow-x-auto scrollbar-none">
+          {(Object.keys(SORT_LABELS) as SortKey[]).map((key) => (
+            <Chip key={key} label={SORT_LABELS[key]} active={sort === key} onClick={() => setSort(key)} />
+          ))}
+        </div>
+        <div className="flex gap-2 overflow-x-auto scrollbar-none">
+          {(Object.keys(FILTER_LABELS) as FilterKey[]).map((key) => (
+            <Chip key={key} label={FILTER_LABELS[key]} active={filter === key} onClick={() => setFilter(key)} />
+          ))}
+        </div>
+      </div>
+
+      {processed.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-12 text-white/40">
+          <p className="text-sm">Aucun fichier pour ce filtre</p>
+          <button onClick={() => setFilter('all')} className="mt-3 text-accent text-sm hover:underline">
+            Voir tous
+          </button>
+        </div>
+      ) : (
+        processed.map((file, i) => (
+          <FileItem
+            key={file.id}
+            file={file}
+            isActive={file.id === currentFileId}
+            sourceFolder={sourceFolder}
+            sourceFolderId={sourceFolderId}
+            onPlay={onPlay}
+            onArchive={onArchive}
+            fileIndex={i}
+            isOnline={isOnline}
+            playState={stateMap.get(file.id)}
+          />
+        ))
+      )}
     </div>
   );
 }
