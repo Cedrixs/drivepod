@@ -279,6 +279,25 @@ export function FileList({
     return applySort(filtered, sort, stateMap);
   }, [files, sort, filter, stateMap]);
 
+  const remainingSeconds = useMemo(() => {
+    let total = 0;
+    for (const f of files) {
+      const s = stateMap.get(f.id);
+      if (s && s.duration > 0) total += s.duration - s.position;
+    }
+    return total;
+  }, [files, stateMap]);
+
+  const remainingLabel = useMemo((): string | null => {
+    const m = Math.round(remainingSeconds / 60);
+    if (m < 1) return null;
+    if (m < 60) return `${m} min restantes dans ${sourceFolder}`;
+    const h = Math.floor(m / 60);
+    const r = m % 60;
+    const time = r > 0 ? `${h}h ${r}m` : `${h}h`;
+    return `${time} restantes dans ${sourceFolder}`;
+  }, [remainingSeconds, sourceFolder]);
+
   const Chip = ({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }): React.JSX.Element => (
     <button
       onClick={onClick}
@@ -305,6 +324,9 @@ export function FileList({
     <div>
       {/* Sort & filter bar */}
       <div className="bg-navy-800 border-b border-white/10 px-4 py-2 space-y-2">
+        {remainingLabel && (
+          <p className="text-xs text-white/40">{remainingLabel}</p>
+        )}
         <div className="flex gap-2 overflow-x-auto scrollbar-none">
           {(Object.keys(SORT_LABELS) as SortKey[]).map((key) => (
             <Chip key={key} label={SORT_LABELS[key]} active={sort === key} onClick={() => setSort(key)} />
