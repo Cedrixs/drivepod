@@ -197,6 +197,7 @@ export default function App(): React.JSX.Element {
           onSettingsChange={(key, value) => {
             if (key === 'autoRewindSeconds') playerActions.setAutoRewind(value as number);
             if (key === 'skipForwardSeconds' || key === 'skipBackwardSeconds') playerActions.setSkipSeconds(value as number);
+            if (key === 'voiceBoost') playerActions.setVoiceBoost(value as boolean);
           }}
         />
       )}

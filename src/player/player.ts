@@ -49,11 +49,48 @@ class AudioPlayer {
   private pausedAt: number | null = null;
   private static readonly REWIND_THRESHOLD_MS = 30_000;
 
+  private audioCtx: AudioContext | null = null;
+  private sourceNode: MediaElementAudioSourceNode | null = null;
+  private compressor: DynamicsCompressorNode | null = null;
+  private voiceBoostEnabled = false;
+
   constructor() {
     this.audio = new Audio();
     this.audio.preload = 'auto';
     this.bindAudioEvents();
     this.bindVisibilityEvents();
+  }
+
+  private ensureAudioContext(): void {
+    if (this.audioCtx) return;
+    this.audioCtx = new AudioContext();
+    this.sourceNode = this.audioCtx.createMediaElementSource(this.audio);
+
+    this.compressor = this.audioCtx.createDynamicsCompressor();
+    // Tuned for voice intelligibility
+    this.compressor.threshold.value = -24;
+    this.compressor.knee.value = 10;
+    this.compressor.ratio.value = 4;
+    this.compressor.attack.value = 0.003;
+    this.compressor.release.value = 0.25;
+
+    if (this.voiceBoostEnabled) {
+      this.sourceNode.connect(this.compressor).connect(this.audioCtx.destination);
+    } else {
+      this.sourceNode.connect(this.audioCtx.destination);
+    }
+  }
+
+  setVoiceBoost(enabled: boolean): void {
+    this.voiceBoostEnabled = enabled;
+    if (!this.audioCtx || !this.sourceNode || !this.compressor) return;
+    this.sourceNode.disconnect();
+    this.compressor.disconnect();
+    if (enabled) {
+      this.sourceNode.connect(this.compressor).connect(this.audioCtx.destination);
+    } else {
+      this.sourceNode.connect(this.audioCtx.destination);
+    }
   }
 
   private emit(event: PlayerEvent): void {
@@ -246,6 +283,10 @@ class AudioPlayer {
   }
 
   async play(): Promise<void> {
+    this.ensureAudioContext();
+    if (this.audioCtx?.state === 'suspended') {
+      await this.audioCtx.resume();
+    }
     if (this.pausedAt !== null && this.autoRewindSeconds > 0) {
       const elapsed = Date.now() - this.pausedAt;
       if (elapsed >= AudioPlayer.REWIND_THRESHOLD_MS) {

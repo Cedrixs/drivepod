@@ -42,11 +42,15 @@ export function usePlayer(onArchive?: (fileId: string, fileName: string, sourceF
   setQueue: (files: DriveFile[], source: string, startIndex?: number) => void;
   setSkipSeconds: (s: number) => void;
   setAutoRewind: (s: number) => void;
+  setVoiceBoost: (enabled: boolean) => void;
 } {
   const [state, setState] = useState<PlayerHookState>(initialState);
 
   useEffect(() => {
-    void getSettings().then((s) => player.setAutoRewind(s.autoRewindSeconds));
+    void getSettings().then((s) => {
+      player.setAutoRewind(s.autoRewindSeconds);
+      player.setVoiceBoost(s.voiceBoost);
+    });
   }, []);
 
   useEffect(() => {
@@ -111,5 +115,6 @@ export function usePlayer(onArchive?: (fileId: string, fileName: string, sourceF
     setQueue,
     setSkipSeconds: (s: number) => { player.skipSeconds = s; },
     setAutoRewind: (s: number) => { player.setAutoRewind(s); },
+    setVoiceBoost: (enabled: boolean) => { player.setVoiceBoost(enabled); },
   };
 }

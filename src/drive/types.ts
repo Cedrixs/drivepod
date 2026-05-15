@@ -54,6 +54,7 @@ export interface AppSettings {
   autoDownload: boolean;
   autoDownloadCount: number;
   autoRewindSeconds: number;
+  voiceBoost: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -63,4 +64,5 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoDownload: false,
   autoDownloadCount: 5,
   autoRewindSeconds: 5,
+  voiceBoost: false,
 };
