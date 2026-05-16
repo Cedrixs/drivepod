@@ -10,6 +10,7 @@ import { PlayerFull } from './ui/PlayerFull';
 import { Settings } from './ui/Settings';
 import { OfflineBanner } from './ui/OfflineBanner';
 import { SettingsIcon, RefreshIcon, SearchIcon, SunIcon, MoonIcon } from './ui/icons';
+import { Wordmark } from './ui/Wordmark';
 import { Dashboard } from './ui/Dashboard';
 import { useTheme } from './hooks/useTheme';
 import { useApp } from './hooks/useApp';
@@ -27,6 +28,7 @@ export default function App(): React.JSX.Element {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [queueTabActive, setQueueTabActive] = useState(false);
   const [statsTabActive, setStatsTabActive] = useState(false);
+  const [activeRestTime, setActiveRestTime] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [capturesOpen, setCapturesOpen] = useState(false);
 
@@ -148,129 +150,131 @@ export default function App(): React.JSX.Element {
   );
 
   return (
-    <div className="min-h-screen bg-bg flex flex-col text-text-1" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
+    <div className="min-h-screen bg-bg text-text-1" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
       {!online && <OfflineBanner pendingCount={appState.pendingQueueCount} />}
 
-      {/* Header */}
-      <header
-        className="flex items-center justify-between bg-surface-1 border-b border-border-1 px-4"
-        style={{ minHeight: 48, paddingBottom: 12, paddingTop: 8 }}
-      >
-        {/* Logo + wordmark */}
-        <div className="flex items-center gap-2.5">
-          <img src="/drivepod/Logo-Drixs.png" alt="" width={32} height={32} className="flex-shrink-0" style={{ borderRadius: 8 }} />
-          <span className="font-semibold text-text-1" style={{ fontSize: 18, letterSpacing: '-0.02em' }}>
-            DrivePod
-          </span>
-        </div>
+      {/* Centered column — full-width on mobile, max 640px on desktop */}
+      <div className="mx-auto flex flex-col lg:border-x lg:border-border-1" style={{ maxWidth: 640, minHeight: '100dvh' }}>
 
-        {/* Action buttons — 44×44 touch targets */}
-        <div className="flex items-center">
-          <button
-            onClick={() => setSearchOpen(true)}
-            className="w-11 h-11 flex items-center justify-center text-text-3 hover:text-text-1 transition-colors"
-            title="Rechercher"
-          >
-            <SearchIcon size={20} />
-          </button>
-          <button
-            onClick={toggleTheme}
-            className="w-11 h-11 flex items-center justify-center text-text-3 hover:text-text-1 transition-colors"
-            title={theme === 'dark' ? 'Thème clair' : 'Thème sombre'}
-          >
-            {theme === 'dark' ? <SunIcon size={20} /> : <MoonIcon size={20} />}
-          </button>
-          <button
-            onClick={() => void refresh()}
-            disabled={appState.loading}
-            className="w-11 h-11 flex items-center justify-center text-text-3 hover:text-text-1 transition-colors"
-            title="Actualiser"
-          >
-            <RefreshIcon size={20} className={appState.loading ? 'animate-spin' : ''} />
-          </button>
-          <div className="relative">
+        {/* Header */}
+        <header
+          className="flex items-center justify-between bg-surface-1 border-b border-border-1 px-4"
+          style={{ minHeight: 48, paddingBottom: 12, paddingTop: 8 }}
+        >
+          <div className="flex items-center gap-2.5">
+            <img src="/drivepod/Logo-Drixs.png" alt="" width={64} height={64} className="flex-shrink-0" style={{ borderRadius: 12 }} />
+            <Wordmark size={18} />
+          </div>
+
+          <div className="flex items-center">
             <button
-              onClick={() => setSettingsOpen(true)}
+              onClick={() => setSearchOpen(true)}
               className="w-11 h-11 flex items-center justify-center text-text-3 hover:text-text-1 transition-colors"
-              title="Paramètres"
+              title="Rechercher"
             >
-              <SettingsIcon size={20} />
+              <SearchIcon size={20} />
             </button>
-            {appState.pendingQueueCount > 0 && (
-              <span
-                className="absolute rounded-full bg-accent pointer-events-none"
-                style={{ width: 8, height: 8, top: 8, right: 8, boxShadow: '0 0 0 2px var(--surface-1)' }}
-              />
-            )}
+            <button
+              onClick={toggleTheme}
+              className="w-11 h-11 flex items-center justify-center text-text-3 hover:text-text-1 transition-colors"
+              title={theme === 'dark' ? 'Thème clair' : 'Thème sombre'}
+            >
+              {theme === 'dark' ? <SunIcon size={20} /> : <MoonIcon size={20} />}
+            </button>
+            <button
+              onClick={() => void refresh()}
+              disabled={appState.loading}
+              className="w-11 h-11 flex items-center justify-center text-text-3 hover:text-text-1 transition-colors"
+              title="Actualiser"
+            >
+              <RefreshIcon size={20} className={appState.loading ? 'animate-spin' : ''} />
+            </button>
+            <div className="relative">
+              <button
+                onClick={() => setSettingsOpen(true)}
+                className="w-11 h-11 flex items-center justify-center text-text-3 hover:text-text-1 transition-colors"
+                title="Paramètres"
+              >
+                <SettingsIcon size={20} />
+              </button>
+              {appState.pendingQueueCount > 0 && (
+                <span
+                  className="absolute rounded-full bg-accent pointer-events-none"
+                  style={{ width: 8, height: 8, top: 8, right: 8, boxShadow: '0 0 0 2px var(--surface-1)' }}
+                />
+              )}
+            </div>
           </div>
+        </header>
+
+        {/* Source tabs */}
+        <SourceTabs
+          sources={appState.sources}
+          activeIndex={appState.activeSourceIndex}
+          onSelect={(i) => { setQueueTabActive(false); setStatsTabActive(false); setActiveRestTime(null); setActiveSource(i); }}
+          queueCount={playerState.customQueue.length}
+          queueActive={queueTabActive}
+          onQueueSelect={() => { setStatsTabActive(false); setQueueTabActive(true); }}
+          statsActive={statsTabActive}
+          onStatsSelect={() => { setQueueTabActive(false); setStatsTabActive(true); }}
+          activeRestTime={activeRestTime ?? undefined}
+        />
+
+        {/* File list */}
+        <div
+          className="flex-1 overflow-y-auto"
+          style={{ paddingBottom: playerState.currentFile ? 'calc(80px + env(safe-area-inset-bottom))' : '0' }}
+        >
+          {appState.error && (
+            <div className="mx-4 mt-4 p-3 bg-red-500/20 border border-red-500/40 rounded-xl text-red-300 text-sm">
+              {appState.error}
+            </div>
+          )}
+          {appState.loading ? (
+            <div className="flex items-center justify-center py-16">
+              <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : statsTabActive ? (
+            <Dashboard />
+          ) : queueTabActive ? (
+            <QueueList
+              queue={playerState.customQueue}
+              currentFileId={playerState.currentFile?.id ?? null}
+              onRemove={playerActions.removeFromCustomQueue}
+              onClear={() => { playerActions.clearCustomQueue(); setQueueTabActive(false); }}
+              onPlayNow={async (item, index) => {
+                playerActions.removeFromCustomQueue(index);
+                const savedState = await getLocalPlaybackState(item.file.id);
+                const settings = await getSettings();
+                playerActions.setSpeed(settings.defaultSpeed);
+                playerActions.setSkipSeconds(settings.skipForwardSeconds);
+                await playerActions.loadAndPlay(item.file, item.sourceFolder, savedState?.position ?? 0);
+              }}
+            />
+          ) : activeSource ? (
+            <FileList
+              files={activeSource.files}
+              sourceFolder={activeSource.folder.name}
+              sourceFolderId={activeSource.folder.id}
+              currentFileId={playerState.currentFile?.id ?? null}
+              onPlay={(file, index) => void handlePlayFile(file, index)}
+              onArchive={(file) => void handleArchive(file)}
+              onAddToQueue={(file) => {
+                playerActions.addToCustomQueue(file, activeSource.folder.name);
+              }}
+              isOnline={online}
+              onRefresh={() => void refresh()}
+              onRestTimeChange={(t) => setActiveRestTime(t)}
+            />
+          ) : (
+            <div className="flex flex-col items-center justify-center py-16" style={{ color: 'var(--text-3)' }}>
+              <p style={{ fontSize: 14 }}>Créez des sous-dossiers dans Audio/ sur Drive</p>
+            </div>
+          )}
         </div>
-      </header>
-
-      {/* Source tabs */}
-      <SourceTabs
-        sources={appState.sources}
-        activeIndex={appState.activeSourceIndex}
-        onSelect={(i) => { setQueueTabActive(false); setStatsTabActive(false); setActiveSource(i); }}
-        queueCount={playerState.customQueue.length}
-        queueActive={queueTabActive}
-        onQueueSelect={() => { setStatsTabActive(false); setQueueTabActive(true); }}
-        statsActive={statsTabActive}
-        onStatsSelect={() => { setQueueTabActive(false); setStatsTabActive(true); }}
-      />
-
-      {/* File list */}
-      <div
-        className="flex-1 overflow-y-auto"
-        style={{ paddingBottom: playerState.currentFile ? 'calc(80px + env(safe-area-inset-bottom))' : '0' }}
-      >
-        {appState.error && (
-          <div className="mx-4 mt-4 p-3 bg-red-500/20 border border-red-500/40 rounded-xl text-red-300 text-sm">
-            {appState.error}
-          </div>
-        )}
-        {appState.loading ? (
-          <div className="flex items-center justify-center py-16">
-            <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
-          </div>
-        ) : statsTabActive ? (
-          <Dashboard />
-        ) : queueTabActive ? (
-          <QueueList
-            queue={playerState.customQueue}
-            currentFileId={playerState.currentFile?.id ?? null}
-            onRemove={playerActions.removeFromCustomQueue}
-            onClear={() => { playerActions.clearCustomQueue(); setQueueTabActive(false); }}
-            onPlayNow={async (item, index) => {
-              playerActions.removeFromCustomQueue(index);
-              const savedState = await getLocalPlaybackState(item.file.id);
-              const settings = await getSettings();
-              playerActions.setSpeed(settings.defaultSpeed);
-              playerActions.setSkipSeconds(settings.skipForwardSeconds);
-              await playerActions.loadAndPlay(item.file, item.sourceFolder, savedState?.position ?? 0);
-            }}
-          />
-        ) : activeSource ? (
-          <FileList
-            files={activeSource.files}
-            sourceFolder={activeSource.folder.name}
-            sourceFolderId={activeSource.folder.id}
-            currentFileId={playerState.currentFile?.id ?? null}
-            onPlay={(file, index) => void handlePlayFile(file, index)}
-            onArchive={(file) => void handleArchive(file)}
-            onAddToQueue={(file) => {
-              playerActions.addToCustomQueue(file, activeSource.folder.name);
-            }}
-            isOnline={online}
-            onRefresh={() => void refresh()}
-          />
-        ) : (
-          <div className="flex flex-col items-center justify-center py-16 text-white/40">
-            <p className="text-sm">Créez des sous-dossiers dans Audio/ sur Drive</p>
-          </div>
-        )}
       </div>
 
-      {/* Mini player V2 */}
+      {/* Mini player — fixed, responsive on desktop */}
       {playerState.currentFile && !playerOpen && (
         <PlayerBar
           playerState={playerState}
@@ -300,6 +304,7 @@ export default function App(): React.JSX.Element {
           onClose={() => setPlayerOpen(false)}
           skipSeconds={player_skipSeconds()}
           sourceFolderId={currentFileSource?.folder.id}
+          sourceFolder={currentFileSource?.folder.name}
         />
       )}
 

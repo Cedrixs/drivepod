@@ -60,6 +60,9 @@ export function SearchIcon(p: IconProps): React.JSX.Element {
 export function ListPlusIcon(p: IconProps): React.JSX.Element {
   return <Icon {...p}><line x1="3" y1="6" x2="15" y2="6" /><line x1="3" y1="12" x2="15" y2="12" /><line x1="3" y1="18" x2="9" y2="18" /><line x1="18" y1="14" x2="18" y2="22" /><line x1="14" y1="18" x2="22" y2="18" /></Icon>;
 }
+export function SortIcon(p: IconProps): React.JSX.Element {
+  return <Icon {...p}><path d="M7 4v16M3 8l4-4 4 4M17 20V4M13 16l4 4 4-4"/></Icon>;
+}
 export function DotsVIcon(p: IconProps): React.JSX.Element {
   return <Icon {...p}><circle cx="12" cy="5" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.4" fill="currentColor" stroke="none"/></Icon>;
 }

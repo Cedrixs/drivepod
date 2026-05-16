@@ -13,9 +13,16 @@ function fmt(minutes: number): string {
 
 function StatCard({ label, value }: { label: string; value: string }): React.JSX.Element {
   return (
-    <div className="bg-white/5 rounded-xl p-4">
-      <p className="text-xs text-white/40 mb-1">{label}</p>
-      <p className="text-2xl font-bold text-white">{value}</p>
+    <div style={{
+      background: 'var(--surface-1)', border: '1px solid var(--border-1)',
+      borderRadius: 'var(--r-lg)', padding: '14px 16px',
+    }}>
+      <p style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 500, color: 'var(--text-4)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 8 }}>
+        {label}
+      </p>
+      <p style={{ fontFamily: 'var(--font-mono)', fontSize: 22, fontWeight: 600, color: 'var(--text-1)', fontVariantNumeric: 'tabular-nums' }}>
+        {value}
+      </p>
     </div>
   );
 }
@@ -29,7 +36,7 @@ export function Dashboard(): React.JSX.Element {
 
   if (!stats) {
     return (
-      <div className="flex justify-center py-16">
+      <div style={{ display: 'flex', justifyContent: 'center', padding: '64px 0' }}>
         <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
       </div>
     );
@@ -39,30 +46,31 @@ export function Dashboard(): React.JSX.Element {
   const maxMin = sources[0]?.[1] ?? 1;
 
   return (
-    <div className="px-4 py-6 space-y-6">
-      {/* Top stats */}
-      <div className="grid grid-cols-2 gap-3">
+    <div style={{ padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: 24 }}>
+      {/* Top stats grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
         <StatCard label="Aujourd'hui" value={fmt(stats.todayMinutes)} />
         <StatCard label="Cette semaine" value={fmt(stats.weekMinutes)} />
-        <StatCard label="Série" value={stats.streak > 0 ? `${stats.streak} jour${stats.streak > 1 ? 's' : ''}` : '—'} />
-        <StatCard label="Terminés ce mois" value={String(stats.monthFilesCompleted)} />
+        <StatCard label="Série" value={stats.streak > 0 ? `${stats.streak}j` : '—'} />
+        <StatCard label="Terminés / mois" value={String(stats.monthFilesCompleted)} />
       </div>
 
       {/* Source breakdown */}
       {sources.length > 0 && (
         <div>
-          <p className="text-xs text-white/40 uppercase tracking-wider mb-3">Par source</p>
-          <div className="space-y-3">
+          <p style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 500, color: 'var(--text-4)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 14 }}>
+            Par source
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             {sources.map(([src, min]) => (
               <div key={src}>
-                <div className="flex justify-between text-sm mb-1">
-                  <span className="text-white/70">{src}</span>
-                  <span className="text-white/40">{fmt(min)}</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <span style={{ fontFamily: 'var(--font-sans)', fontSize: 13, fontWeight: 500, color: 'var(--text-2)' }}>{src}</span>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-3)', fontVariantNumeric: 'tabular-nums' }}>{fmt(min)}</span>
                 </div>
-                <div className="h-1.5 bg-white/10 rounded-full">
+                <div style={{ height: 3, background: 'var(--surface-3)', borderRadius: 2, overflow: 'hidden' }}>
                   <div
-                    className="h-full bg-accent rounded-full"
-                    style={{ width: `${Math.round((min / maxMin) * 100)}%` }}
+                    style={{ height: '100%', background: 'var(--accent)', borderRadius: 2, width: `${Math.round((min / maxMin) * 100)}%` }}
                   />
                 </div>
               </div>
@@ -72,7 +80,7 @@ export function Dashboard(): React.JSX.Element {
       )}
 
       {stats.weekMinutes === 0 && (
-        <p className="text-center text-sm text-white/30 py-8">
+        <p style={{ textAlign: 'center', fontFamily: 'var(--font-sans)', fontSize: 14, color: 'var(--text-4)', padding: '32px 0' }}>
           Commencez à écouter pour voir vos statistiques
         </p>
       )}

@@ -30,8 +30,8 @@ export function PlayerBar({ playerState, sourceFolder, onPlayPause, onExpand }: 
 
   return (
     <div
-      className="fixed z-40 select-none"
-      style={{ left: 8, right: 8, bottom: 'calc(8px + env(safe-area-inset-bottom))' }}
+      className="fixed z-40 select-none left-2 right-2 lg:left-1/2 lg:right-auto lg:w-[624px] lg:-translate-x-1/2"
+      style={{ bottom: 'calc(8px + env(safe-area-inset-bottom))' }}
     >
       <div
         className="flex items-center border border-border-1 cursor-pointer"

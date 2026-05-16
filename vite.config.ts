@@ -16,8 +16,8 @@ export default defineConfig({
       },
       includeAssets: ['icons/*.svg', 'icons/*.png', 'favicon.ico'],
       manifest: {
-        name: 'DrivePod',
-        short_name: 'DrivePod',
+        name: 'Drivepod',
+        short_name: 'Drivepod',
         description: 'Lecteur audio pour Google Drive',
         theme_color: '#1a1a2e',
         background_color: '#1a1a2e',

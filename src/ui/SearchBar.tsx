@@ -53,11 +53,15 @@ function HighlightedTitle({ title, positions }: { title: string; positions: numb
     <span>
       {Array.from(title).map((char, i) =>
         posSet.has(i)
-          ? <span key={i} className="text-accent font-bold">{char}</span>
+          ? <span key={i} style={{ color: 'var(--accent)', fontWeight: 600 }}>{char}</span>
           : <span key={i}>{char}</span>,
       )}
     </span>
   );
+}
+
+function abbrev(name: string): string {
+  return name.slice(0, 3).toUpperCase() + '.';
 }
 
 interface Props {
@@ -79,59 +83,100 @@ export function SearchBar({ sources, onPlay, onClose }: Props): React.JSX.Elemen
 
   return (
     <div
-      className="fixed inset-0 bg-navy-900 z-50 flex flex-col"
-      style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}
+      className="fixed inset-0 z-50 flex flex-col lg:inset-y-0 lg:left-1/2 lg:right-auto lg:w-[640px] lg:-translate-x-1/2"
+      style={{ background: 'var(--bg)', paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}
     >
       {/* Search input row */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-white/10 bg-navy-800">
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 10,
+        padding: '8px 12px',
+        background: 'var(--surface-1)',
+        borderBottom: '1px solid var(--border-1)',
+      }}>
         <input
           ref={inputRef}
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={`Rechercher dans ${totalFiles} fichiers…`}
-          className="flex-1 bg-white/10 rounded-xl px-4 py-2 text-sm text-white placeholder-white/30 outline-none focus:ring-1 focus:ring-accent"
+          style={{
+            flex: 1, height: 38, padding: '0 14px',
+            borderRadius: 'var(--r-lg)',
+            background: 'var(--surface-2)', border: '1px solid var(--border-1)',
+            fontFamily: 'var(--font-sans)', fontSize: 14, color: 'var(--text-1)',
+            outline: 'none',
+          }}
         />
-        <button onClick={onClose} className="p-2 text-white/60 hover:text-white transition-colors flex-shrink-0">
+        <button
+          onClick={onClose}
+          style={{
+            width: 44, height: 44, flexShrink: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'none', border: 'none', cursor: 'pointer',
+            color: 'var(--text-3)', borderRadius: 10,
+          }}
+        >
           <XIcon size={20} />
         </button>
       </div>
 
       {/* Results */}
-      <div className="flex-1 overflow-y-auto">
+      <div style={{ flex: 1, overflowY: 'auto' }}>
         {!query.trim() ? (
-          <div className="flex flex-col items-center justify-center py-16 text-white/30">
-            <p className="text-sm">Tapez pour rechercher dans tous les dossiers</p>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '64px 0' }}>
+            <p style={{ fontFamily: 'var(--font-sans)', fontSize: 14, color: 'var(--text-3)' }}>
+              Tapez pour rechercher dans tous les dossiers
+            </p>
           </div>
         ) : results.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-white/30">
-            <p className="text-sm">Aucun résultat pour « {query} »</p>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '64px 0' }}>
+            <p style={{ fontFamily: 'var(--font-sans)', fontSize: 14, color: 'var(--text-3)' }}>
+              Aucun résultat pour « {query} »
+            </p>
           </div>
         ) : (
           <>
-            <p className="px-4 py-2 text-xs text-white/30">
+            <div style={{ padding: '8px 16px 4px', fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 500, color: 'var(--text-4)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
               {results.length} résultat{results.length > 1 ? 's' : ''}
-            </p>
+            </div>
             {results.map((r, i) => (
               <button
                 key={`${r.file.id}-${i}`}
                 onClick={() => { onPlay(r.file, r.source, r.fileIndex); onClose(); }}
-                className="w-full flex items-center gap-3 px-4 py-3 border-b border-white/5 hover:bg-white/5 transition-colors text-left"
+                style={{
+                  width: '100%', display: 'flex', alignItems: 'center', gap: 12,
+                  padding: '12px 16px',
+                  borderBottom: '1px solid var(--border-1)',
+                  background: 'none', border: 'none',
+                  cursor: 'pointer', textAlign: 'left',
+                }}
               >
-                <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center flex-shrink-0">
-                  <PlayIcon size={12} className="text-white/50 ml-0.5" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-white truncate">
+                {/* Source abbrev */}
+                <span style={{
+                  fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 500,
+                  color: 'var(--accent)', background: 'var(--accent-soft)',
+                  padding: '3px 6px', borderRadius: 4, flexShrink: 0,
+                  letterSpacing: '0.04em',
+                }}>
+                  {abbrev(r.source.folder.name)}
+                </span>
+
+                {/* Title */}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{
+                    fontFamily: 'var(--font-sans)', fontSize: 14, fontWeight: 500,
+                    color: 'var(--text-1)', lineHeight: 1.3,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>
                     <HighlightedTitle
                       title={r.file.name.replace(/\.mp3$/i, '')}
                       positions={r.matchPositions}
                     />
                   </p>
-                  <span className="text-xs text-white/30 bg-white/5 rounded px-1.5 py-0.5 mt-0.5 inline-block">
-                    {r.source.folder.name}
-                  </span>
                 </div>
+
+                {/* Play indicator */}
+                <PlayIcon size={14} style={{ color: 'var(--text-4)', flexShrink: 0 }} />
               </button>
             ))}
           </>

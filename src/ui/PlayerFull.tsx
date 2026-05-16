@@ -20,6 +20,7 @@ interface Props {
   onClose: () => void;
   skipSeconds: number;
   sourceFolderId?: string;
+  sourceFolder?: string;
 }
 
 const SPEEDS = [0.75, 1, 1.25, 1.5, 1.75, 2] as const;
@@ -33,20 +34,20 @@ function formatTime(seconds: number): string {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+function abbrev(name: string): string {
+  return name.slice(0, 3).toUpperCase() + '.';
+}
+
+const BTN: React.CSSProperties = {
+  width: 44, height: 44, borderRadius: 10,
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
+  background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)',
+};
+
 export function PlayerFull({
-  playerState,
-  onPlayPause,
-  onNext,
-  onPrevious,
-  onSeek,
-  onSkipForward,
-  onSkipBackward,
-  onSetSpeed,
-  onArchive,
-  onCapture,
-  onClose,
-  skipSeconds,
-  sourceFolderId,
+  playerState, onPlayPause, onNext, onPrevious,
+  onSeek, onSkipForward, onSkipBackward, onSetSpeed,
+  onArchive, onCapture, onClose, skipSeconds, sourceFolderId, sourceFolder,
 }: Props): React.JSX.Element | null {
   const { currentFile, isPlaying, position, duration, speed, buffering } = playerState;
   const [summary, setSummary] = useState<string | null>(null);
@@ -64,142 +65,159 @@ export function PlayerFull({
     onSeek(parseFloat(e.target.value));
   }, [onSeek]);
 
+  const handleCapture = useCallback((): void => {
+    onCapture();
+    setCaptured(true);
+    setTimeout(() => setCaptured(false), 2000);
+  }, [onCapture]);
+
   if (!currentFile) return null;
 
   const title = currentFile.name.replace(/\.mp3$/i, '');
-  const progress = duration > 0 ? (position / duration) * 100 : 0;
+  const remaining = Math.max(0, duration - position);
 
   return (
     <div
-      className="fixed inset-0 bg-navy-900 flex flex-col z-50 select-none"
+      className="fixed inset-0 z-50 flex flex-col select-none lg:inset-y-0 lg:left-1/2 lg:right-auto lg:w-[640px] lg:-translate-x-1/2"
       style={{
+        background: 'var(--bg)',
         paddingTop: 'env(safe-area-inset-top)',
         paddingBottom: 'env(safe-area-inset-bottom)',
       }}
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3">
-        <button onClick={onClose} className="p-2 text-white/60 hover:text-white transition-colors">
-          <ChevronDownIcon size={24} />
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 8px 4px 12px', minHeight: 52 }}>
+        <button onClick={onClose} style={BTN}>
+          <ChevronDownIcon size={22} />
         </button>
-        <p className="text-sm font-medium text-white/60 uppercase tracking-wider">En lecture</p>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => { onCapture(); setCaptured(true); setTimeout(() => setCaptured(false), 2000); }}
-            className={`p-2 transition-colors ${captured ? 'text-accent' : 'text-white/60 hover:text-accent'}`}
-            title="Capturer ce passage"
-          >
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 500, letterSpacing: '0.1em', color: 'var(--text-3)', textTransform: 'uppercase' }}>
+          En lecture
+        </span>
+        <div style={{ display: 'flex' }}>
+          <button onClick={handleCapture} style={{ ...BTN, color: captured ? 'var(--accent)' : 'var(--text-3)' }}>
             <BookmarkIcon size={20} />
           </button>
-          <button onClick={onArchive} className="p-2 text-white/60 hover:text-accent transition-colors">
+          <button onClick={onArchive} style={BTN}>
             <ArchiveIcon size={20} />
           </button>
         </div>
       </div>
 
-      {/* Artwork placeholder */}
-      <div className="flex-1 flex items-center justify-center px-8">
-        <div className="w-full max-w-xs aspect-square rounded-2xl bg-gradient-to-br from-accent/30 to-navy-700 flex items-center justify-center shadow-2xl">
-          <svg viewBox="0 0 64 64" className="w-20 h-20 text-white/20 fill-current">
-            <circle cx="32" cy="32" r="28" />
-            <polygon points="26,20 46,32 26,44" fill="white" opacity="0.6" />
-          </svg>
+      {/* Spine + title */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '0 32px', gap: 20, minHeight: 0 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 52, fontWeight: 500, lineHeight: 1, color: 'var(--accent)', letterSpacing: '-0.02em' }}>
+            {sourceFolder ? abbrev(sourceFolder) : '···'}
+          </span>
+          <div style={{ height: 1, background: 'var(--border-1)' }} />
+        </div>
+
+        <div>
+          <h2 style={{
+            fontFamily: 'var(--font-sans)', fontSize: 22, fontWeight: 600,
+            lineHeight: 1.25, letterSpacing: '-0.02em', color: 'var(--text-1)',
+            display: '-webkit-box', WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical' as const, overflow: 'hidden', margin: 0,
+          }}>
+            {title}
+          </h2>
+          {summary && (
+            <p style={{
+              fontFamily: 'var(--font-sans)', fontSize: 13, lineHeight: 1.55,
+              color: 'var(--text-3)',
+              display: '-webkit-box', WebkitLineClamp: 3,
+              WebkitBoxOrient: 'vertical' as const, overflow: 'hidden',
+              margin: '10px 0 0',
+            }}>
+              {summary}
+            </p>
+          )}
         </div>
       </div>
 
-      {/* Track info */}
-      <div className="px-8 py-4">
-        <h2 className="text-xl font-bold text-white truncate text-center">{title}</h2>
-        {summary && (
-          <p className="mt-3 text-xs text-white/40 text-center leading-relaxed line-clamp-4">
-            {summary}
-          </p>
-        )}
-      </div>
-
-      {/* Seek bar */}
-      <div className="px-8 pb-2">
-        <input
-          type="range"
-          min={0}
-          max={duration || 1}
-          step={1}
-          value={position}
-          onChange={handleSeek}
-          className="w-full h-1 accent-accent cursor-pointer"
-          style={{ WebkitAppearance: 'none', appearance: 'none' }}
-        />
-        <div className="flex justify-between mt-1">
-          <span className="text-xs text-white/40">{formatTime(position)}</span>
-          <span className="text-xs text-white/40">{formatTime(duration)}</span>
-        </div>
-      </div>
-
-      {/* Controls */}
-      <div className="px-8 pb-4 flex items-center justify-between">
-        <button
-          onClick={() => void onPrevious()}
-          className="p-3 text-white/60 hover:text-white transition-colors"
-        >
-          <SkipBackIcon size={28} />
-        </button>
-
-        <button
-          onClick={() => onSkipBackward(skipSeconds)}
-          className="flex flex-col items-center text-white/60 hover:text-white transition-colors"
-        >
-          <SkipBackIcon size={22} />
-          <span className="text-xs mt-0.5">{skipSeconds}s</span>
-        </button>
-
-        <button
-          onClick={onPlayPause}
-          disabled={buffering}
-          className="w-16 h-16 rounded-full bg-accent flex items-center justify-center text-white shadow-lg active:scale-95 transition-transform"
-        >
-          {isPlaying ? <PauseIcon size={28} /> : <PlayIcon size={28} className="ml-1" />}
-        </button>
-
-        <button
-          onClick={() => onSkipForward(skipSeconds)}
-          className="flex flex-col items-center text-white/60 hover:text-white transition-colors"
-        >
-          <SkipForwardIcon size={22} />
-          <span className="text-xs mt-0.5">{skipSeconds}s</span>
-        </button>
-
-        <button
-          onClick={() => void onNext()}
-          className="p-3 text-white/60 hover:text-white transition-colors"
-        >
-          <SkipForwardIcon size={28} />
-        </button>
-      </div>
-
-      {/* Speed selector */}
-      <div className="px-8 pb-6 flex items-center justify-center gap-2">
-        {SPEEDS.map((s) => (
-          <button
-            key={s}
-            onClick={() => onSetSpeed(s)}
-            className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
-              speed === s
-                ? 'bg-accent text-white'
-                : 'bg-white/10 text-white/60 hover:bg-white/20'
-            }`}
-          >
-            {s}x
-          </button>
-        ))}
-      </div>
-
-      {/* Progress bar */}
-      <div className="px-8 pb-2">
-        <div className="h-1 bg-white/10 rounded-full">
-          <div
-            className="h-full bg-accent/50 rounded-full transition-all"
-            style={{ width: `${progress}%` }}
+      {/* Seek + controls + speed */}
+      <div style={{ padding: '0 24px 20px' }}>
+        {/* Seek bar */}
+        <div style={{ marginBottom: 20 }}>
+          <input
+            type="range"
+            min={0}
+            max={duration || 1}
+            step={1}
+            value={position}
+            onChange={handleSeek}
+            style={{ width: '100%', accentColor: 'var(--accent)', cursor: 'pointer', height: 3 }}
           />
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6 }}>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-3)', fontVariantNumeric: 'tabular-nums' }}>
+              {formatTime(position)}
+            </span>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-3)', fontVariantNumeric: 'tabular-nums' }}>
+              -{formatTime(remaining)}
+            </span>
+          </div>
+        </div>
+
+        {/* Controls */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+          <button onClick={() => void onPrevious()} style={BTN}>
+            <SkipBackIcon size={24} />
+          </button>
+
+          <button
+            onClick={() => onSkipBackward(skipSeconds)}
+            style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, background: 'none', border: 'none', cursor: 'pointer' }}
+          >
+            <SkipBackIcon size={20} style={{ color: 'var(--text-3)' }} />
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)', fontVariantNumeric: 'tabular-nums' }}>{skipSeconds}s</span>
+          </button>
+
+          <button
+            onClick={onPlayPause}
+            disabled={buffering}
+            style={{
+              width: 64, height: 64, borderRadius: 32,
+              background: 'var(--accent)', color: 'var(--accent-text)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              border: 'none', cursor: 'pointer', flexShrink: 0,
+            }}
+          >
+            {isPlaying
+              ? <PauseIcon size={28} />
+              : <PlayIcon size={28} style={{ marginLeft: 3 }} />
+            }
+          </button>
+
+          <button
+            onClick={() => onSkipForward(skipSeconds)}
+            style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, background: 'none', border: 'none', cursor: 'pointer' }}
+          >
+            <SkipForwardIcon size={20} style={{ color: 'var(--text-3)' }} />
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)', fontVariantNumeric: 'tabular-nums' }}>{skipSeconds}s</span>
+          </button>
+
+          <button onClick={() => void onNext()} style={BTN}>
+            <SkipForwardIcon size={24} />
+          </button>
+        </div>
+
+        {/* Speed pills */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+          {SPEEDS.map((s) => (
+            <button
+              key={s}
+              onClick={() => onSetSpeed(s)}
+              style={{
+                height: 28, padding: '0 10px', borderRadius: 'var(--r-pill)',
+                background: speed === s ? 'var(--accent)' : 'var(--surface-2)',
+                color: speed === s ? 'var(--accent-text)' : 'var(--text-3)',
+                border: 'none', cursor: 'pointer',
+                fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 500,
+              }}
+            >
+              {s}x
+            </button>
+          ))}
         </div>
       </div>
     </div>

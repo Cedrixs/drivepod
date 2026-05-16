@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { CheckIcon, DotsVIcon } from './icons';
+import { CheckIcon, DotsVIcon, SortIcon, ChevronDownIcon } from './icons';
 import { downloadForOffline, checkCached } from '../offline/cache';
 import { fetchMarkdownContent, extractSummary } from '../drive/api';
 import { getAllPlaybackStates } from '../state/db';
@@ -14,15 +14,16 @@ const SORT_LABELS: Record<SortKey, string> = {
   'date-asc':  'Date ↑',
   'date-desc': 'Date ↓',
   duration:    'Durée',
-  progress:    'Progression',
+  progress:    'Avancement',
 };
 
-const FILTER_LABELS: Record<FilterKey, string> = {
-  all:          'Tous',
-  'not-started':'Non commencés',
-  'in-progress':'À reprendre',
-  'almost-done':'Presque finis',
-};
+const SORT_ORDER: SortKey[] = ['date-asc', 'date-desc', 'duration', 'progress'];
+
+const FILTER_CHIPS: { key: FilterKey; label: string }[] = [
+  { key: 'in-progress',  label: 'À reprendre' },
+  { key: 'not-started',  label: 'Non commencés' },
+  { key: 'almost-done',  label: 'Presque finis' },
+];
 
 function getProgress(state: PlaybackState | undefined): number {
   if (!state || !state.duration) return 0;
@@ -282,9 +283,10 @@ interface FileListProps {
   onAddToQueue?: (file: DriveFile) => void;
   isOnline: boolean;
   onRefresh: () => void;
+  onRestTimeChange?: (time: string | null) => void;
 }
 
-export function FileList({ files, sourceFolder, sourceFolderId, currentFileId, onPlay, onArchive, onAddToQueue, isOnline, onRefresh }: FileListProps): React.JSX.Element {
+export function FileList({ files, sourceFolder, sourceFolderId, currentFileId, onPlay, onArchive, onAddToQueue, isOnline, onRefresh, onRestTimeChange }: FileListProps): React.JSX.Element {
   const [sort, setSort] = useState<SortKey>('date-asc');
   const [filter, setFilter] = useState<FilterKey>('all');
   const [stateMap, setStateMap] = useState<Map<string, PlaybackState>>(new Map());
@@ -297,34 +299,23 @@ export function FileList({ files, sourceFolder, sourceFolderId, currentFileId, o
 
   const processed = useMemo(() => applySort(applyFilter(files, filter, stateMap), sort, stateMap), [files, sort, filter, stateMap]);
 
-  const remainingSeconds = useMemo(() => {
+  const restTimeShort = useMemo((): string | null => {
     let total = 0;
     for (const f of files) {
       const s = stateMap.get(f.id);
       if (s && s.duration > 0) total += s.duration - s.position;
     }
-    return total;
-  }, [files, stateMap]);
-
-  const remainingLabel = useMemo((): string | null => {
-    const m = Math.round(remainingSeconds / 60);
+    const m = Math.round(total / 60);
     if (m < 1) return null;
-    if (m < 60) return `${m} min restantes dans ${sourceFolder}`;
+    if (m < 60) return `${m} min`;
     const h = Math.floor(m / 60);
     const r = m % 60;
-    return `${r > 0 ? `${h}h ${r}m` : `${h}h`} restantes dans ${sourceFolder}`;
-  }, [remainingSeconds, sourceFolder]);
+    return r > 0 ? `${h}h ${r}m` : `${h}h`;
+  }, [files, stateMap]);
 
-  const Chip = ({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }): React.JSX.Element => (
-    <button
-      onClick={onClick}
-      className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-colors flex-shrink-0 ${
-        active ? 'bg-accent text-accent-text' : 'bg-surface-2 text-text-3 hover:bg-surface-3'
-      }`}
-    >
-      {label}
-    </button>
-  );
+  useEffect(() => {
+    onRestTimeChange?.(restTimeShort);
+  }, [restTimeShort, onRestTimeChange]);
 
   if (files.length === 0) {
     return (
@@ -340,20 +331,57 @@ export function FileList({ files, sourceFolder, sourceFolderId, currentFileId, o
   return (
     <div>
       {/* Sort & filter bar */}
-      <div className="border-b border-border-1 px-4 py-2 space-y-2" style={{ background: 'var(--surface-1)' }}>
-        {remainingLabel && (
-          <p style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--accent)', letterSpacing: '0.02em' }}>{remainingLabel}</p>
-        )}
-        <div className="flex gap-2 overflow-x-auto scrollbar-none">
-          {(Object.keys(SORT_LABELS) as SortKey[]).map((key) => (
-            <Chip key={key} label={SORT_LABELS[key]} active={sort === key} onClick={() => setSort(key)} />
-          ))}
-        </div>
-        <div className="flex gap-2 overflow-x-auto scrollbar-none">
-          {(Object.keys(FILTER_LABELS) as FilterKey[]).map((key) => (
-            <Chip key={key} label={FILTER_LABELS[key]} active={filter === key} onClick={() => setFilter(key)} />
-          ))}
-        </div>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8,
+        padding: '10px 16px',
+        borderBottom: '1px solid var(--border-1)',
+        background: 'var(--surface-1)',
+        overflowX: 'auto',
+      }}>
+        {/* Sort chip — click cycles through options */}
+        <button
+          onClick={() => {
+            const idx = SORT_ORDER.indexOf(sort);
+            setSort(SORT_ORDER[(idx + 1) % SORT_ORDER.length]);
+          }}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 5,
+            height: 30, padding: '0 10px', flexShrink: 0,
+            borderRadius: 'var(--r-pill)',
+            background: 'var(--surface-2)', border: '1px solid var(--border-1)',
+            color: 'var(--text-2)', cursor: 'pointer',
+            fontFamily: 'var(--font-sans)', fontSize: 12, fontWeight: 500, whiteSpace: 'nowrap',
+          }}
+        >
+          <SortIcon size={13} />
+          <span>{SORT_LABELS[sort]}</span>
+          <ChevronDownIcon size={13} />
+        </button>
+
+        {/* Separator */}
+        <div style={{ width: 1, height: 18, background: 'var(--border-1)', flexShrink: 0 }} />
+
+        {/* Filter chips */}
+        {FILTER_CHIPS.map(({ key, label }) => {
+          const active = filter === key;
+          return (
+            <button
+              key={key}
+              onClick={() => setFilter(active ? 'all' : key)}
+              style={{
+                height: 30, padding: '0 10px', flexShrink: 0,
+                borderRadius: 'var(--r-pill)',
+                background: active ? 'var(--accent-soft)' : 'var(--surface-2)',
+                border: `1px solid ${active ? 'var(--accent)' : 'var(--border-1)'}`,
+                color: active ? 'var(--accent)' : 'var(--text-3)',
+                cursor: 'pointer',
+                fontFamily: 'var(--font-sans)', fontSize: 12, fontWeight: 500, whiteSpace: 'nowrap',
+              }}
+            >
+              {label}
+            </button>
+          );
+        })}
       </div>
 
       {processed.length === 0 ? (

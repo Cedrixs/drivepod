@@ -15,6 +15,81 @@ interface Props {
   onShowCaptures?: () => void;
 }
 
+function SectionLabel({ children }: { children: React.ReactNode }): React.JSX.Element {
+  return (
+    <p style={{
+      fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 500,
+      color: 'var(--text-4)', letterSpacing: '0.1em', textTransform: 'uppercase',
+      marginBottom: 12,
+    }}>
+      {children}
+    </p>
+  );
+}
+
+function PillGroup<T extends number | string>({
+  options, value, onChange, fmt,
+}: {
+  options: readonly T[];
+  value: T;
+  onChange: (v: T) => void;
+  fmt?: (v: T) => string;
+}): React.JSX.Element {
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+      {options.map((o) => (
+        <button
+          key={String(o)}
+          onClick={() => onChange(o)}
+          style={{
+            height: 32, padding: '0 14px', borderRadius: 'var(--r-pill)',
+            background: value === o ? 'var(--accent)' : 'var(--surface-2)',
+            color: value === o ? 'var(--accent-text)' : 'var(--text-3)',
+            border: 'none', cursor: 'pointer',
+            fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 500,
+          }}
+        >
+          {fmt ? fmt(o) : String(o)}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }): React.JSX.Element {
+  return (
+    <button
+      onClick={() => onChange(!value)}
+      style={{
+        width: 44, height: 24, borderRadius: 12, flexShrink: 0,
+        background: value ? 'var(--accent)' : 'var(--surface-3)',
+        border: 'none', cursor: 'pointer', position: 'relative',
+        transition: 'background 140ms',
+      }}
+    >
+      <span style={{
+        position: 'absolute', top: 2,
+        left: value ? 22 : 2,
+        width: 20, height: 20, borderRadius: 10,
+        background: value ? 'var(--accent-text)' : 'var(--text-2)',
+        transition: 'left 140ms',
+      }} />
+    </button>
+  );
+}
+
+function Row({ label, sub, right }: { label: string; sub?: string; right: React.ReactNode }): React.JSX.Element {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+      <div>
+        <p style={{ fontFamily: 'var(--font-sans)', fontSize: 14, fontWeight: 500, color: 'var(--text-1)' }}>{label}</p>
+        {sub && <p style={{ fontFamily: 'var(--font-sans)', fontSize: 12, color: 'var(--text-4)', marginTop: 2 }}>{sub}</p>}
+      </div>
+      {right}
+    </div>
+  );
+}
+
 export function Settings({ onClose, audioFolderId, onResync, onSettingsChange, onShowCaptures }: Props): React.JSX.Element {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [cacheStats, setCacheStats] = useState({ count: 0, totalSize: 0 });
@@ -62,136 +137,95 @@ export function Settings({ onClose, audioFolderId, onResync, onSettingsChange, o
 
   return (
     <div
-      className="fixed inset-0 bg-navy-900 z-50 overflow-y-auto"
-      style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}
+      className="fixed inset-0 z-50 overflow-y-auto lg:inset-y-0 lg:left-1/2 lg:right-auto lg:w-[640px] lg:-translate-x-1/2"
+      style={{ background: 'var(--bg)', paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}
     >
-      <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
-        <h2 className="text-lg font-semibold text-white">Réglages</h2>
-        <button onClick={onClose} className="p-2 text-white/60 hover:text-white">
+      {/* Header */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '8px 8px 8px 20px', minHeight: 52,
+        borderBottom: '1px solid var(--border-1)',
+        background: 'var(--surface-1)',
+      }}>
+        <h2 style={{ fontFamily: 'var(--font-sans)', fontSize: 18, fontWeight: 600, color: 'var(--text-1)', letterSpacing: '-0.01em' }}>
+          Réglages
+        </h2>
+        <button
+          onClick={onClose}
+          style={{ width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', borderRadius: 10 }}
+        >
           <XIcon size={20} />
         </button>
       </div>
 
-      <div className="px-4 py-6 space-y-6">
-        {/* Playback */}
+      <div style={{ padding: '24px 20px', display: 'flex', flexDirection: 'column', gap: 32 }}>
+
+        {/* Lecture */}
         <section>
-          <h3 className="text-xs font-semibold text-white/40 uppercase tracking-wider mb-3">Lecture</h3>
-          <div className="space-y-4">
+          <SectionLabel>Lecture</SectionLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
             <div>
-              <label className="text-sm text-white/80 block mb-2">Vitesse par défaut</label>
-              <div className="flex gap-2 flex-wrap">
-                {([0.75, 1, 1.25, 1.5, 1.75, 2] as const).map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => void updateSetting('defaultSpeed', s)}
-                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                      settings.defaultSpeed === s
-                        ? 'bg-accent text-white'
-                        : 'bg-white/10 text-white/60 hover:bg-white/20'
-                    }`}
-                  >
-                    {s}x
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <label className="text-sm text-white/80 block mb-2">Saut (avant/arrière)</label>
-              <div className="flex gap-2">
-                {([15, 30] as const).map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => { void updateSetting('skipForwardSeconds', s); void updateSetting('skipBackwardSeconds', s); }}
-                    className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                      settings.skipForwardSeconds === s
-                        ? 'bg-accent text-white'
-                        : 'bg-white/10 text-white/60 hover:bg-white/20'
-                    }`}
-                  >
-                    {s}s
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <label className="text-sm text-white/80 block mb-2">
-                Recul à la reprise
-                <span className="ml-2 text-xs text-white/40">après pause &gt; 30 s</span>
-              </label>
-              <div className="flex gap-2 flex-wrap">
-                {([0, 5, 10, 15, 20] as const).map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => void updateSetting('autoRewindSeconds', s)}
-                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                      settings.autoRewindSeconds === s
-                        ? 'bg-accent text-white'
-                        : 'bg-white/10 text-white/60 hover:bg-white/20'
-                    }`}
-                  >
-                    {s === 0 ? 'Off' : `${s}s`}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* Voice boost */}
-        <section>
-          <h3 className="text-xs font-semibold text-white/40 uppercase tracking-wider mb-3">Audio</h3>
-          <div className="flex items-center justify-between">
-            <div>
-              <label className="text-sm text-white/80">Boost voix</label>
-              <p className="text-xs text-white/40 mt-0.5">Compresseur — meilleure intelligibilité dans le bruit</p>
-            </div>
-            <button
-              onClick={() => void updateSetting('voiceBoost', !settings.voiceBoost)}
-              className={`w-12 h-6 rounded-full transition-colors ${
-                settings.voiceBoost ? 'bg-accent' : 'bg-white/20'
-              } relative flex-shrink-0`}
-            >
-              <span
-                className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${
-                  settings.voiceBoost ? 'left-6' : 'left-0.5'
-                }`}
+              <p style={{ fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--text-3)', marginBottom: 10 }}>Vitesse par défaut</p>
+              <PillGroup
+                options={[0.75, 1, 1.25, 1.5, 1.75, 2] as const}
+                value={settings.defaultSpeed}
+                onChange={(v) => void updateSetting('defaultSpeed', v)}
+                fmt={(v) => `${v}x`}
               />
-            </button>
+            </div>
+            <div>
+              <p style={{ fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--text-3)', marginBottom: 10 }}>Saut (avant / arrière)</p>
+              <PillGroup
+                options={[15, 30] as const}
+                value={settings.skipForwardSeconds}
+                onChange={(v) => { void updateSetting('skipForwardSeconds', v); void updateSetting('skipBackwardSeconds', v); }}
+                fmt={(v) => `${v}s`}
+              />
+            </div>
+            <div>
+              <p style={{ fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--text-3)', marginBottom: 10 }}>
+                Recul à la reprise{' '}
+                <span style={{ color: 'var(--text-4)' }}>après pause &gt; 30 s</span>
+              </p>
+              <PillGroup
+                options={[0, 5, 10, 15, 20] as const}
+                value={settings.autoRewindSeconds}
+                onChange={(v) => void updateSetting('autoRewindSeconds', v)}
+                fmt={(v) => v === 0 ? 'Off' : `${v}s`}
+              />
+            </div>
           </div>
         </section>
 
-        {/* Offline */}
+        {/* Audio */}
         <section>
-          <h3 className="text-xs font-semibold text-white/40 uppercase tracking-wider mb-3">Hors-ligne</h3>
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <label className="text-sm text-white/80">Téléchargement auto (5 plus anciens)</label>
-              <button
-                onClick={() => void updateSetting('autoDownload', !settings.autoDownload)}
-                className={`w-12 h-6 rounded-full transition-colors ${
-                  settings.autoDownload ? 'bg-accent' : 'bg-white/20'
-                } relative`}
-              >
-                <span
-                  className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${
-                    settings.autoDownload ? 'left-6' : 'left-0.5'
-                  }`}
-                />
-              </button>
-            </div>
+          <SectionLabel>Audio</SectionLabel>
+          <Row
+            label="Boost voix"
+            sub="Compresseur — meilleure intelligibilité dans le bruit"
+            right={<Toggle value={settings.voiceBoost} onChange={(v) => void updateSetting('voiceBoost', v)} />}
+          />
+        </section>
 
-            <div className="bg-white/5 rounded-xl p-4">
-              <p className="text-sm text-white/60 mb-3">
+        {/* Hors-ligne */}
+        <section>
+          <SectionLabel>Hors-ligne</SectionLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <Row
+              label="Téléchargement auto"
+              sub="5 fichiers les plus anciens"
+              right={<Toggle value={settings.autoDownload} onChange={(v) => void updateSetting('autoDownload', v)} />}
+            />
+            <div style={{ background: 'var(--surface-1)', border: '1px solid var(--border-1)', borderRadius: 'var(--r-lg)', padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <p style={{ fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--text-3)' }}>
                 Cache : {cacheStats.count} fichier{cacheStats.count > 1 ? 's' : ''} ({formatBytes(cacheStats.totalSize)})
               </p>
               <button
                 onClick={() => void handleClearCache()}
                 disabled={clearing || cacheStats.count === 0}
-                className="text-sm text-red-400 hover:text-red-300 transition-colors disabled:opacity-50"
+                style={{ fontFamily: 'var(--font-sans)', fontSize: 13, fontWeight: 500, color: 'var(--danger)', background: 'none', border: 'none', cursor: 'pointer', opacity: (clearing || cacheStats.count === 0) ? 0.4 : 1 }}
               >
-                {clearing ? 'Suppression...' : 'Vider le cache hors-ligne'}
+                {clearing ? 'Suppression…' : 'Vider'}
               </button>
             </div>
           </div>
@@ -199,14 +233,14 @@ export function Settings({ onClose, audioFolderId, onResync, onSettingsChange, o
 
         {/* Sync */}
         <section>
-          <h3 className="text-xs font-semibold text-white/40 uppercase tracking-wider mb-3">Synchronisation</h3>
+          <SectionLabel>Synchronisation</SectionLabel>
           <button
             onClick={() => void handleResync()}
             disabled={resyncing || !audioFolderId}
-            className="flex items-center gap-2 text-sm text-white/60 hover:text-white transition-colors disabled:opacity-50"
+            style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', opacity: (resyncing || !audioFolderId) ? 0.4 : 1 }}
           >
             <RefreshIcon size={16} className={resyncing ? 'animate-spin' : ''} />
-            {resyncing ? 'Synchronisation...' : 'Resynchroniser depuis Drive'}
+            <span style={{ fontFamily: 'var(--font-sans)', fontSize: 14 }}>{resyncing ? 'Synchronisation…' : 'Resynchroniser depuis Drive'}</span>
           </button>
         </section>
 
@@ -215,22 +249,22 @@ export function Settings({ onClose, audioFolderId, onResync, onSettingsChange, o
           <section>
             <button
               onClick={onShowCaptures}
-              className="flex items-center gap-2 text-sm text-white/60 hover:text-white transition-colors"
+              style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)' }}
             >
               <BookmarkIcon size={16} />
-              Voir les passages capturés
+              <span style={{ fontFamily: 'var(--font-sans)', fontSize: 14 }}>Passages capturés</span>
             </button>
           </section>
         )}
 
-        {/* Account */}
-        <section className="pt-4 border-t border-white/10">
+        {/* Déconnexion */}
+        <section style={{ paddingTop: 8, borderTop: '1px solid var(--border-1)' }}>
           <button
             onClick={() => void signOut()}
-            className="flex items-center gap-2 text-sm text-red-400 hover:text-red-300 transition-colors"
+            style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)' }}
           >
             <LogOutIcon size={16} />
-            Se déconnecter
+            <span style={{ fontFamily: 'var(--font-sans)', fontSize: 14, fontWeight: 500 }}>Se déconnecter</span>
           </button>
         </section>
       </div>

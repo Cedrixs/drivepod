@@ -1,4 +1,4 @@
-import { XIcon, GripVerticalIcon, PlayIcon } from './icons';
+import { GripVerticalIcon, PlayIcon, XIcon } from './icons';
 import type { QueuedFile } from '../hooks/usePlayer';
 
 interface Props {
@@ -9,25 +9,34 @@ interface Props {
   onPlayNow: (item: QueuedFile, index: number) => void;
 }
 
+function abbrev(name: string): string {
+  return name.slice(0, 3).toUpperCase() + '.';
+}
+
 export function QueueList({ queue, currentFileId: _currentFileId, onRemove, onClear, onPlayNow }: Props): React.JSX.Element {
   if (queue.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 text-white/40">
-        <p className="text-sm">File d'attente vide</p>
-        <p className="text-xs mt-2">Appuyez sur + dans la liste pour ajouter des fichiers</p>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '64px 0', gap: 8 }}>
+        <p style={{ fontFamily: 'var(--font-sans)', fontSize: 14, color: 'var(--text-3)' }}>File d'attente vide</p>
+        <p style={{ fontFamily: 'var(--font-sans)', fontSize: 12, color: 'var(--text-4)' }}>Appuyez sur + dans la liste pour ajouter des fichiers</p>
       </div>
     );
   }
 
   return (
     <div>
-      <div className="flex items-center justify-between px-4 py-2 border-b border-white/10">
-        <span className="text-xs text-white/40 uppercase tracking-wider">
+      {/* Header bar */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '10px 16px',
+        borderBottom: '1px solid var(--border-1)',
+      }}>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 500, color: 'var(--text-3)', fontVariantNumeric: 'tabular-nums' }}>
           {queue.length} fichier{queue.length > 1 ? 's' : ''} en attente
         </span>
         <button
           onClick={onClear}
-          className="text-xs text-red-400/70 hover:text-red-400 transition-colors"
+          style={{ fontFamily: 'var(--font-sans)', fontSize: 13, fontWeight: 500, color: 'var(--danger)', background: 'none', border: 'none', cursor: 'pointer' }}
         >
           Vider
         </button>
@@ -38,33 +47,52 @@ export function QueueList({ queue, currentFileId: _currentFileId, onRemove, onCl
         return (
           <div
             key={`${item.file.id}-${i}`}
-            className="flex items-center gap-3 px-4 py-3 border-b border-white/5 hover:bg-white/5 transition-colors"
+            style={{
+              display: 'grid', gridTemplateColumns: '20px 36px 1fr auto',
+              alignItems: 'center', gap: 10,
+              padding: '12px 16px',
+              borderBottom: '1px solid var(--border-1)',
+            }}
           >
-            <GripVerticalIcon size={16} className="text-white/20 flex-shrink-0" />
+            {/* Drag handle */}
+            <GripVerticalIcon size={16} style={{ color: 'var(--text-4)' }} />
 
-            <div className="w-6 h-6 flex items-center justify-center flex-shrink-0">
-              <span className="text-white/30 text-xs">{i + 1}</span>
+            {/* Number + source abbrev */}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 500, color: 'var(--text-4)', fontVariantNumeric: 'tabular-nums' }}>
+                {String(i + 1).padStart(2, '0')}
+              </span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, fontWeight: 500, color: 'var(--accent)', letterSpacing: '0.04em' }}>
+                {abbrev(item.sourceFolder)}
+              </span>
             </div>
 
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-white truncate">{title}</p>
-              <p className="text-xs text-white/40 mt-0.5">{item.sourceFolder}</p>
+            {/* Title */}
+            <div style={{ minWidth: 0 }}>
+              <p style={{
+                fontFamily: 'var(--font-sans)', fontSize: 14, fontWeight: 500,
+                color: 'var(--text-1)', lineHeight: 1.3,
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}>
+                {title}
+              </p>
             </div>
 
-            <div className="flex items-center gap-1 flex-shrink-0">
+            {/* Actions */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
               <button
                 onClick={() => onPlayNow(item, i)}
-                className="p-2 text-white/40 hover:text-accent transition-colors"
+                style={{ width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)' }}
                 title="Jouer maintenant"
               >
-                <PlayIcon size={14} />
+                <PlayIcon size={15} />
               </button>
               <button
                 onClick={() => onRemove(i)}
-                className="p-2 text-white/40 hover:text-white transition-colors"
+                style={{ width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-4)' }}
                 title="Retirer de la file"
               >
-                <XIcon size={14} />
+                <XIcon size={15} />
               </button>
             </div>
           </div>
