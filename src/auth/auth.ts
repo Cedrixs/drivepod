@@ -195,13 +195,18 @@ export async function handleOAuthCallback(): Promise<OAuthCallbackResult> {
   return { ok: true };
 }
 
+interface StoredTokens {
+  accessToken: string;
+  encryptedRefreshToken: string | null;
+  expiresAt: number;
+}
+
+// Single-flight : les appels concurrents attendent le même refresh
+let refreshInFlight: Promise<string> | null = null;
+
 export async function getAccessToken(): Promise<string> {
   const db = await getDB();
-  const stored = await db.get('tokens', 'main') as {
-    accessToken: string;
-    encryptedRefreshToken: string | null;
-    expiresAt: number;
-  } | undefined;
+  const stored = await db.get('tokens', 'main') as StoredTokens | undefined;
 
   if (!stored) throw new Error('NOT_AUTHENTICATED');
 
@@ -212,28 +217,53 @@ export async function getAccessToken(): Promise<string> {
 
   if (!stored.encryptedRefreshToken) throw new Error('NO_REFRESH_TOKEN');
 
-  const refreshToken = await decryptToken(stored.encryptedRefreshToken);
-  const body = new URLSearchParams({
+  if (!refreshInFlight) {
+    refreshInFlight = refreshAccessToken(stored).finally(() => { refreshInFlight = null; });
+  }
+  return refreshInFlight;
+}
+
+async function refreshAccessToken(stored: StoredTokens): Promise<string> {
+  const refreshToken = await decryptToken(stored.encryptedRefreshToken!);
+  const params: Record<string, string> = {
     client_id: CLIENT_ID,
     grant_type: 'refresh_token',
     refresh_token: refreshToken,
-  });
+  };
+  // Les clients OAuth "Web application" exigent le client_secret sur TOUS les
+  // grants, y compris refresh_token — sans lui Google répond 401 invalid_client
+  // et l'utilisateur était déconnecté à chaque expiration du token (1 h).
+  if (CLIENT_SECRET) params['client_secret'] = CLIENT_SECRET;
+  const body = new URLSearchParams(params);
 
-  const resp = await fetch(TOKEN_ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body.toString(),
-  });
+  let resp: Response;
+  try {
+    resp = await fetch(TOKEN_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+    });
+  } catch {
+    // Panne réseau : on garde les tokens, un retry ultérieur peut réussir
+    throw new Error('REFRESH_TRANSIENT');
+  }
 
   if (!resp.ok) {
-    if (resp.status === 400 || resp.status === 401) {
-      await signOut();
+    const detail = await resp.text().catch(() => '');
+    // Seul invalid_grant signifie que le refresh token est révoqué/expiré et
+    // qu'une reconnexion est nécessaire. Tout le reste (5xx, quota, erreur de
+    // config invalid_client) est traité comme transitoire pour ne pas détruire
+    // la session locale inutilement.
+    if (resp.status === 400 && detail.includes('invalid_grant')) {
+      await clearTokensOnly();
       throw new Error('REFRESH_FAILED');
     }
-    throw new Error(`Token refresh HTTP ${resp.status}`);
+    console.error('Token refresh failed', resp.status, detail);
+    throw new Error('REFRESH_TRANSIENT');
   }
 
   const data = await resp.json() as { access_token: string; expires_in: number };
+  const db = await getDB();
   await db.put('tokens', {
     ...stored,
     accessToken: data.access_token,
@@ -242,6 +272,28 @@ export async function getAccessToken(): Promise<string> {
 
   await storeTokenForSW(data.access_token);
   return data.access_token;
+}
+
+// Force le prochain getAccessToken() à rafraîchir (ex : après un 401 Drive)
+export async function invalidateAccessToken(): Promise<void> {
+  try {
+    const db = await getDB();
+    const stored = await db.get('tokens', 'main') as StoredTokens | undefined;
+    if (stored) await db.put('tokens', { ...stored, expiresAt: 0 }, 'main');
+  } catch { /* ignore */ }
+}
+
+// Ne supprime que les credentials — positions de lecture, file offline et
+// audio en cache survivent : une reconnexion restaure la session à l'identique.
+async function clearTokensOnly(): Promise<void> {
+  try {
+    const db = await getDB();
+    await db.clear('tokens');
+  } catch { /* ignore */ }
+  try {
+    const cache = await caches.open('dp-sw-tokens');
+    await cache.delete('/sw-token');
+  } catch { /* ignore */ }
 }
 
 export async function isAuthenticated(): Promise<boolean> {

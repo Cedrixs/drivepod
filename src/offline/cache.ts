@@ -1,8 +1,12 @@
-import { downloadFileToCache, getCachedAudioUrl as _getCachedAudioUrl, isFileCached, removeCachedAudio } from '../drive/api';
+import { downloadFileToCache, getCachedAudioUrl as _getCachedAudioUrl, isFileCached, removeCachedAudio, listCachedFilesMeta } from '../drive/api';
 import type { DriveFile } from '../drive/types';
 
-export async function downloadForOffline(file: DriveFile): Promise<void> {
-  await downloadFileToCache(file.id, file.name);
+export async function downloadForOffline(file: DriveFile, sourceFolder = '', sourceFolderId = ''): Promise<void> {
+  await downloadFileToCache(file.id, file.name, {
+    sourceFolder,
+    sourceFolderId,
+    createdTime: file.createdTime,
+  });
 }
 
 export async function getOfflineAudioUrl(fileId: string, fileName: string): Promise<string | null> {
@@ -64,6 +68,7 @@ export async function autoDownloadOldest(
   files: DriveFile[],
   sourceFolder: string,
   count = 5,
+  sourceFolderId = '',
 ): Promise<void> {
   let downloaded = 0;
   for (const file of files) {
@@ -71,14 +76,17 @@ export async function autoDownloadOldest(
     const cached = await isFileCached(file.id, file.name);
     if (!cached) {
       try {
-        await downloadFileToCache(file.id, file.name);
+        await downloadFileToCache(file.id, file.name, {
+          sourceFolder,
+          sourceFolderId,
+          createdTime: file.createdTime,
+        });
         downloaded++;
       } catch {
         // continue
       }
     }
   }
-  void sourceFolder;
 }
 
-export { removeCachedAudio };
+export { removeCachedAudio, listCachedFilesMeta };

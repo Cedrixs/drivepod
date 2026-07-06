@@ -19,10 +19,11 @@ registerRoute(
   ({ url }: { url: URL }) => url.pathname.startsWith('/drivepod/stream/'),
   async ({ request, url }: { request: Request; url: URL }): Promise<Response> => {
     const fileId = url.pathname.replace('/drivepod/stream/', '');
-    try {
+
+    const fetchWithCachedToken = async (): Promise<Response | null> => {
       const tokenCache = await caches.open('dp-sw-tokens');
       const tokenResp = await tokenCache.match('/sw-token');
-      if (!tokenResp) return new Response('Unauthorized: no cached token', { status: 401 });
+      if (!tokenResp) return null;
 
       const { token } = (await tokenResp.json()) as { token: string };
       const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
@@ -30,10 +31,26 @@ registerRoute(
       const range = request.headers.get('Range');
       if (range) headers['Range'] = range;
 
-      return await fetch(
+      return fetch(
         `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
         { headers },
       );
+    };
+
+    try {
+      let resp = await fetchWithCachedToken();
+      if (!resp) return new Response('Unauthorized: no cached token', { status: 401 });
+
+      // Token en cache expiré (écoute > 1 h) : la page détient le refresh token,
+      // on lui demande de renouveler puis on retente une fois
+      if (resp.status === 401) {
+        const clients = await self.clients.matchAll();
+        for (const client of clients) client.postMessage({ type: 'DP_TOKEN_EXPIRED' });
+        await new Promise((r) => setTimeout(r, 2_500));
+        resp = (await fetchWithCachedToken()) ?? resp;
+      }
+
+      return resp;
     } catch (err) {
       return new Response(String(err), { status: 500 });
     }

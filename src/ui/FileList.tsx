@@ -101,7 +101,7 @@ interface FileItemProps {
   playState: PlaybackState | undefined;
 }
 
-function FileItem({ file, isActive, onPlay, onArchive, onAddToQueue, fileIndex, isOnline, playState, sourceFolderId }: FileItemProps): React.JSX.Element {
+function FileItem({ file, isActive, onPlay, onArchive, onAddToQueue, fileIndex, isOnline, playState, sourceFolder, sourceFolderId }: FileItemProps): React.JSX.Element {
   const [cached, setCached] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [summary, setSummary] = useState<string | null>(null);
@@ -125,10 +125,10 @@ function FileItem({ file, isActive, onPlay, onArchive, onAddToQueue, fileIndex, 
 
   const handleDownload = useCallback(async (): Promise<void> => {
     setDownloading(true);
-    try { await downloadForOffline(file); setCached(true); }
+    try { await downloadForOffline(file, sourceFolder, sourceFolderId); setCached(true); }
     catch (err) { console.error('Download failed', err); }
     finally { setDownloading(false); }
-  }, [file]);
+  }, [file, sourceFolder, sourceFolderId]);
 
   const toggleSummary = useCallback(async (): Promise<void> => {
     if (summaryOpen) { setSummaryOpen(false); return; }
