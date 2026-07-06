@@ -7,7 +7,7 @@ import { queueArchive } from '../offline/queue';
 import { findOrCreateFolder as createFolder, moveFile } from '../drive/api';
 import { removeFromStateAndSync } from '../state/driveState';
 import { getSettings } from '../state/db';
-import { autoDownloadOldest } from '../offline/cache';
+import { autoDownloadOldest, listCachedFilesMeta } from '../offline/cache';
 import type { DriveFile, DriveFolder } from '../drive/types';
 
 export interface Source {
@@ -27,6 +27,38 @@ export interface AppState {
 }
 
 const AUDIO_FOLDER_NAME = 'Audio';
+const OFFLINE_FALLBACK_FOLDER = 'Téléchargés';
+
+// Reconstruit des sources depuis les fichiers téléchargés (IndexedDB + Cache
+// API) pour que l'app reste utilisable quand Drive est injoignable.
+async function loadCachedSources(): Promise<Source[]> {
+  const metas = await listCachedFilesMeta();
+  if (metas.length === 0) return [];
+
+  const byFolder = new Map<string, { folderId: string; files: DriveFile[] }>();
+  for (const meta of metas) {
+    const folderName = meta.sourceFolder || OFFLINE_FALLBACK_FOLDER;
+    let group = byFolder.get(folderName);
+    if (!group) {
+      group = { folderId: meta.sourceFolderId, files: [] };
+      byFolder.set(folderName, group);
+    }
+    group.files.push({
+      id: meta.fileId,
+      name: meta.name,
+      mimeType: 'audio/mpeg',
+      parents: meta.sourceFolderId ? [meta.sourceFolderId] : [],
+      createdTime: meta.createdTime ?? '',
+      modifiedTime: '',
+      size: meta.size ? String(meta.size) : undefined,
+    });
+  }
+
+  return [...byFolder.entries()].map(([name, group]) => ({
+    folder: { id: group.folderId, name, parents: [] },
+    files: group.files.sort((a, b) => a.createdTime.localeCompare(b.createdTime)),
+  }));
+}
 
 export function useApp(online: boolean): {
   state: AppState;
@@ -73,6 +105,24 @@ export function useApp(online: boolean): {
 
   const init = useCallback(async (): Promise<void> => {
     setState((s) => ({ ...s, loading: true, error: null }));
+
+    // Démarrage hors-ligne : pas d'appel réseau, on sert les fichiers en cache
+    if (!online) {
+      if (audioFolderIdRef.current) {
+        // Sources déjà chargées pendant cette session : on les garde
+        setState((s) => ({ ...s, loading: false }));
+        return;
+      }
+      const authed = await isAuthenticated();
+      if (authed) {
+        const cached = await loadCachedSources().catch(() => [] as Source[]);
+        setState((s) => ({ ...s, authed: true, loading: false, sources: cached }));
+      } else {
+        setState((s) => ({ ...s, authed: false, loading: false }));
+      }
+      return;
+    }
+
     try {
       const callbackResult = await handleOAuthCallback();
       const authed = callbackResult.ok || await isAuthenticated();
@@ -133,13 +183,22 @@ export function useApp(online: boolean): {
       if (settings.autoDownload) {
         const rawSources = await loadSourcesRaw(audioFolderId);
         for (const src of rawSources) {
-          await autoDownloadOldest(src.files, src.folder.name, settings.autoDownloadCount);
+          await autoDownloadOldest(src.files, src.folder.name, settings.autoDownloadCount, src.folder.id);
         }
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg === 'NOT_AUTHENTICATED' || msg === 'REFRESH_FAILED') {
         setState((s) => ({ ...s, authed: false, loading: false }));
+      } else if (msg === 'REFRESH_TRANSIENT' || msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
+        // Google injoignable mais session intacte : mode dégradé sur le cache
+        const cached = await loadCachedSources().catch(() => [] as Source[]);
+        setState((s) => ({
+          ...s,
+          loading: false,
+          sources: s.sources.length > 0 ? s.sources : cached,
+          error: 'Google Drive injoignable pour le moment. Fichiers téléchargés disponibles hors-ligne.',
+        }));
       } else if (msg === 'API_NOT_ENABLED') {
         setState((s) => ({
           ...s,
@@ -195,6 +254,7 @@ export function useApp(online: boolean): {
 
   const refresh = useCallback(async (): Promise<void> => {
     if (!audioFolderIdRef.current) return;
+    if (!navigator.onLine) return;
     setState((s) => ({ ...s, loading: true, error: null }));
     try {
       await loadSources(audioFolderIdRef.current);

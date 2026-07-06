@@ -113,6 +113,15 @@ Audio/
    - Authorized redirect URIs: `https://Cedrixs.github.io/drivepod/`
 5. Copiez le **Client ID** et le **Client Secret** (visibles dans les détails du credential)
 6. **OAuth consent screen** → configurez votre app (nom, email, scopes: `../auth/drive`)
+7. **OAuth consent screen → Publishing status → PUBLISH APP** (passer "In production")
+
+> **⚠️ Publication obligatoire pour éviter les reconnexions**
+> En statut "Testing", Google fait expirer les refresh tokens au bout de **7 jours** :
+> vous devez alors vous reconnecter chaque semaine. En "In production", le refresh
+> token est permanent (tant que l'app n'est pas révoquée et utilisée au moins une
+> fois tous les 6 mois). L'app n'étant pas vérifiée par Google, un écran
+> "Google n'a pas validé cette application" apparaîtra à la connexion : cliquez
+> **Paramètres avancés → Accéder à DrivePod**. C'est normal pour un usage personnel.
 
 > **Pourquoi un Client Secret ?**  
 > Les clients OAuth de type "Web application" dans Google Cloud **requièrent** le `client_secret` lors de l'échange du code d'autorisation. Le PKCE seul ne suffit pas pour ce type de client. Le secret n'est pas dans le code source — il transite uniquement via les secrets GitHub Actions au moment du build.
@@ -204,7 +213,21 @@ handleOAuthCallback()
   → POST /token avec code + code_verifier + client_secret
   → stocke access_token (plain) + refresh_token (AES-256-GCM) en IndexedDB
   → écrit access_token dans Cache API pour le SW
+
+getAccessToken()  (appelé avant chaque requête Drive)
+  → access_token valide → le retourne
+  → expiré → POST /token grant_type=refresh_token + client_secret (requis
+    pour les clients "Web application" — sans lui : 401 à chaque refresh)
+  → refresh single-flight (les appels concurrents partagent la même requête)
+  → invalid_grant (token révoqué) → efface UNIQUEMENT les credentials,
+    les positions et le cache audio survivent à la reconnexion
+  → erreur réseau / 5xx → REFRESH_TRANSIENT, session conservée, mode dégradé
+    sur les fichiers téléchargés
 ```
+
+**Renouvellement pendant le streaming :** si le token du Service Worker expire en
+pleine écoute (session > 1 h), le SW répond au 401 de Drive en demandant à la page
+(`postMessage DP_TOKEN_EXPIRED`) de rafraîchir le token, puis réessaie une fois.
 
 ---
 
@@ -266,11 +289,12 @@ Ou plus simplement : attendez quelques minutes, l'app se rechargera automatiquem
 ### Token expiré / "Se connecter à Google Drive" réapparaît
 
 **Causes possibles :**
-1. Refresh token révoqué (max 6 mois d'inactivité pour les apps en mode test)
+1. **OAuth consent screen en statut "Testing"** → les refresh tokens expirent après **7 jours**. Passez l'app "In production" (voir Configuration Google Cloud, étape 7). C'est la cause la plus fréquente de reconnexions répétées.
 2. Permissions révoquées depuis [myaccount.google.com/permissions](https://myaccount.google.com/permissions)
-3. Stockage navigateur effacé
+3. Stockage navigateur effacé (mode navigation privée, nettoyage Chrome)
+4. Inactivité > 6 mois
 
-**Solution :** reconnectez-vous. Les positions de lecture sont sauvées sur Drive (`_drivepod_state.json`) et seront restaurées.
+**Solution :** reconnectez-vous. Les positions de lecture (Drive `_drivepod_state.json`), le cache audio et la file offline sont conservés localement lors d'une déconnexion automatique — seuls les credentials sont effacés.
 
 ### Un fichier ne s'archive pas
 
