@@ -9,6 +9,8 @@ interface Props {
   onQueueSelect?: () => void;
   statsActive?: boolean;
   onStatsSelect?: () => void;
+  archiveActive?: boolean;
+  onArchiveSelect?: () => void;
   activeRestTime?: string;
 }
 
@@ -72,6 +74,7 @@ export function SourceTabs({
   sources, activeIndex, onSelect,
   queueCount = 0, queueActive = false, onQueueSelect,
   statsActive = false, onStatsSelect,
+  archiveActive = false, onArchiveSelect,
   activeRestTime,
 }: Props): React.JSX.Element {
   return (
@@ -93,7 +96,7 @@ export function SourceTabs({
         </div>
       ) : (
         sources.map((src, i) => {
-          const active = !queueActive && !statsActive && i === activeIndex;
+          const active = !queueActive && !statsActive && !archiveActive && i === activeIndex;
           return (
             <Tab
               key={src.folder.id}
@@ -120,6 +123,12 @@ export function SourceTabs({
         label="Stats"
         active={statsActive}
         onClick={onStatsSelect}
+      />
+
+      <Tab
+        label="Archive"
+        active={archiveActive}
+        onClick={onArchiveSelect}
       />
     </div>
   );

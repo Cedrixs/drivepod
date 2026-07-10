@@ -42,10 +42,19 @@ Lecteur audio PWA pour Google Drive. Lit vos MP3 depuis le dossier `Audio/` de v
 
 ### Archivage
 
-- **Auto à 95 %** de progression → déplace le fichier vers `Archive/YYYY-MM/<source>/` sur Drive
+- **Auto à 95 %** de progression → déplace le fichier vers `Archive/<AAAA-SNN>/<source>/` sur Drive (dossiers hebdo ISO, ex `2026-S28` ; les anciens dossiers mensuels `2026-05` restent lisibles)
 - **Manuel** depuis la liste ou le player plein écran
+- **Groupé depuis l'onglet Synthèses** : un bouton archive tous les audio antérieurs à la synthèse affichée (tous les onglets sauf Synthèses, Révision et Books), vers le dossier de la semaine de la synthèse
 - Passage automatique au fichier suivant après archivage
-- **File d'attente offline** : si hors-ligne, l'opération est enqueued et exécutée au retour online
+- **File d'attente offline** : si hors-ligne, l'opération est enqueued et exécutée au retour online (la semaine de destination est mémorisée dans l'action)
+
+### Onglet Synthèses (lecture écrite)
+
+Quand le dossier `Audio/Synthèses` existe, son onglet affiche en tête la **synthèse hebdo en version écrite** (lue depuis `PDF/Textes IA` sur Drive) : navigation ‹ › entre les semaines, texte repliable, et bouton d'archivage groupé avec récapitulatif par dossier avant confirmation.
+
+### Onglet Archive
+
+Liste les audio archivés **groupés par semaine** (accordéon, chargement à la demande), avec lecture directe et bouton « Désarchiver » qui remet le fichier dans son dossier d'origine.
 
 ### Mode hors-ligne
 

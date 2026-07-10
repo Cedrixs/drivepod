@@ -53,13 +53,14 @@ export function PlayerFull({
   const [summary, setSummary] = useState<string | null>(null);
   const [captured, setCaptured] = useState(false);
 
+  const currentFileName = currentFile?.name ?? null;
   useEffect(() => {
     setSummary(null);
-    if (!currentFile || !sourceFolderId) return;
-    void fetchMarkdownContent(sourceFolderId, currentFile.name).then((md) => {
+    if (!currentFileName || !sourceFolderId) return;
+    void fetchMarkdownContent(sourceFolderId, currentFileName).then((md) => {
       setSummary(md ? extractSummary(md) : null);
     });
-  }, [currentFile?.id, sourceFolderId]);
+  }, [currentFileName, sourceFolderId]);
 
   const handleSeek = useCallback((e: React.ChangeEvent<HTMLInputElement>): void => {
     onSeek(parseFloat(e.target.value));

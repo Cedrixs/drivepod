@@ -1,5 +1,6 @@
 import { getAccessToken, invalidateAccessToken } from '../auth/auth';
 import { getDB } from '../state/db';
+import { normalizeFolderName } from '../state/archiveRules';
 import type { DriveFile, DriveFolder } from './types';
 
 const BASE = 'https://www.googleapis.com/drive/v3';
@@ -145,6 +146,15 @@ export async function listChildren(
 export async function listSubfolders(folderId: string): Promise<DriveFolder[]> {
   const files = await listChildren(folderId, 'application/vnd.google-apps.folder');
   return files.map((f) => ({ id: f.id, name: f.name, parents: f.parents }));
+}
+
+// Cherche un dossier sans le créer (pour les dossiers gérés par le pipeline,
+// comme PDF/Textes IA, qu'on ne veut pas créer par accident depuis l'app)
+export async function findFolder(name: string, parentId: string): Promise<string | null> {
+  const q = `name='${name}' and '${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+  const params = new URLSearchParams({ q, fields: 'files(id)', pageSize: '1' });
+  const data = await driveRequest<{ files: { id: string }[] }>(`/files?${params.toString()}`);
+  return data.files[0]?.id ?? null;
 }
 
 export async function findOrCreateFolder(name: string, parentId: string): Promise<string> {
@@ -293,6 +303,44 @@ export async function isFileCached(fileId: string, fileName: string): Promise<bo
   const cacheUrl = `offline-audio://${fileId}/${encodeURIComponent(fileName)}`;
   const cached = await cache.match(cacheUrl);
   return !!cached;
+}
+
+// ── Synthèses hebdo (PDF/Textes IA) ──────────────────────────────────────────
+
+let textesIaFolderId: string | null = null;
+
+// Les synthèses écrites vivent dans PDF/Textes IA (déposées par la routine
+// Cowork, jamais supprimées par le pipeline) — pas dans Audio/.
+export async function listSynthesisFiles(): Promise<DriveFile[]> {
+  if (!textesIaFolderId) {
+    const root = await driveRequest<{ id: string }>('/files/root?fields=id');
+    const pdfId = await findFolder('PDF', root.id);
+    if (!pdfId) return [];
+    const iaId = await findFolder('Textes IA', pdfId);
+    if (!iaId) return [];
+    textesIaFolderId = iaId;
+  }
+
+  const q = `'${textesIaFolderId}' in parents and trashed=false and name contains 'Synth'`;
+  const params = new URLSearchParams({
+    q,
+    fields: 'files(id,name,mimeType,parents,createdTime,modifiedTime,size)',
+    orderBy: 'createdTime desc',
+    pageSize: '100',
+  });
+  const resp = await driveRequest<FileListResponse>(`/files?${params.toString()}`);
+  return (resp.files ?? []).filter(
+    (f) => normalizeFolderName(f.name).startsWith('synth') && f.name.toLowerCase().endsWith('.md'),
+  );
+}
+
+export async function fetchFileText(fileId: string): Promise<string | null> {
+  try {
+    const resp = await uploadRequest(`${BASE}/files/${fileId}?alt=media`, { method: 'GET' });
+    return await resp.text();
+  } catch {
+    return null;
+  }
 }
 
 // ── Markdown summary ─────────────────────────────────────────────────────────
