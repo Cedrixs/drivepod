@@ -6,6 +6,7 @@ import {
 } from '../state/db';
 import { findOrCreateFolder, moveFile } from '../drive/api';
 import { removeFromStateAndSync } from '../state/driveState';
+import { isoWeekKey } from '../state/archiveRules';
 import type { OfflineAction } from '../drive/types';
 
 export async function queueArchive(action: Omit<OfflineAction, 'id' | 'createdAt'>): Promise<void> {
@@ -41,11 +42,10 @@ export async function flushOfflineQueue(
 
 async function executeAction(action: OfflineAction): Promise<void> {
   if (action.type === 'archive') {
-    const now = new Date();
-    const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const weekKey = action.destWeekKey ?? isoWeekKey(new Date());
     const archiveFolderId = await findOrCreateFolder('Archive', action.audioFolderId);
-    const monthFolderId = await findOrCreateFolder(monthKey, archiveFolderId);
-    const sourceFolderId = await findOrCreateFolder(action.sourceFolder, monthFolderId);
+    const weekFolderId = await findOrCreateFolder(weekKey, archiveFolderId);
+    const sourceFolderId = await findOrCreateFolder(action.sourceFolder, weekFolderId);
     await moveFile(action.fileId, action.sourceFolderId, sourceFolderId);
     await removeFromStateAndSync(action.fileId);
   }

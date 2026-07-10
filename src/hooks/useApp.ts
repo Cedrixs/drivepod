@@ -8,6 +8,7 @@ import { findOrCreateFolder as createFolder, moveFile } from '../drive/api';
 import { removeFromStateAndSync } from '../state/driveState';
 import { getSettings } from '../state/db';
 import { autoDownloadOldest, listCachedFilesMeta } from '../offline/cache';
+import { isoWeekKey, type BulkCandidate } from '../state/archiveRules';
 import type { DriveFile, DriveFolder } from '../drive/types';
 
 export interface Source {
@@ -64,6 +65,7 @@ export function useApp(online: boolean): {
   state: AppState;
   refresh: () => Promise<void>;
   archiveFile: (fileId: string, fileName: string, sourceFolder: string, sourceFolderId: string) => Promise<void>;
+  archiveMany: (items: BulkCandidate[], destWeekKey: string) => Promise<{ ok: number; fail: number }>;
   setActiveSource: (index: number) => void;
   refreshQueueCount: () => Promise<void>;
 } {
@@ -281,24 +283,92 @@ export function useApp(online: boolean): {
     }));
 
     if (!online) {
-      await queueArchive({ type: 'archive', fileId, fileName, sourceFolder, sourceFolderId, audioFolderId });
+      await queueArchive({
+        type: 'archive', fileId, fileName, sourceFolder, sourceFolderId, audioFolderId,
+        destWeekKey: isoWeekKey(new Date()),
+      });
       const count = await getPendingQueueCount();
       setState((s) => ({ ...s, pendingQueueCount: count }));
       return;
     }
 
     try {
-      const now = new Date();
-      const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      const weekKey = isoWeekKey(new Date());
       const archiveFolderId = await createFolder('Archive', audioFolderId);
-      const monthFolderId = await createFolder(monthKey, archiveFolderId);
-      const destFolderId = await createFolder(sourceFolder, monthFolderId);
+      const weekFolderId = await createFolder(weekKey, archiveFolderId);
+      const destFolderId = await createFolder(sourceFolder, weekFolderId);
       await moveFile(fileId, sourceFolderId, destFolderId);
       await removeFromStateAndSync(fileId);
     } catch (err) {
       console.error('Archive failed', err);
       await refresh();
     }
+  }, [online, refresh]);
+
+  // Archivage groupé « articles couverts par la synthèse » : tous les fichiers
+  // partent dans Archive/<semaine de la synthèse>/<source>/
+  const archiveMany = useCallback(async (
+    items: BulkCandidate[],
+    destWeekKey: string,
+  ): Promise<{ ok: number; fail: number }> => {
+    const audioFolderId = audioFolderIdRef.current;
+    if (!audioFolderId || items.length === 0) return { ok: 0, fail: 0 };
+
+    const ids = new Set(items.map((i) => i.file.id));
+    setState((s) => ({
+      ...s,
+      sources: s.sources.map((src) => ({
+        ...src,
+        files: src.files.filter((f) => !ids.has(f.id)),
+      })),
+    }));
+
+    if (!online) {
+      for (const item of items) {
+        await queueArchive({
+          type: 'archive',
+          fileId: item.file.id,
+          fileName: item.file.name,
+          sourceFolder: item.sourceFolder,
+          sourceFolderId: item.sourceFolderId,
+          audioFolderId,
+          destWeekKey,
+        });
+      }
+      const count = await getPendingQueueCount();
+      setState((s) => ({ ...s, pendingQueueCount: count }));
+      return { ok: items.length, fail: 0 };
+    }
+
+    let ok = 0;
+    let fail = 0;
+    try {
+      const archiveFolderId = await createFolder('Archive', audioFolderId);
+      const weekFolderId = await createFolder(destWeekKey, archiveFolderId);
+      const destFolderIds = new Map<string, string>();
+
+      for (const item of items) {
+        try {
+          let destId = destFolderIds.get(item.sourceFolder);
+          if (!destId) {
+            destId = await createFolder(item.sourceFolder, weekFolderId);
+            destFolderIds.set(item.sourceFolder, destId);
+          }
+          await moveFile(item.file.id, item.sourceFolderId, destId);
+          await removeFromStateAndSync(item.file.id);
+          ok++;
+        } catch (err) {
+          console.error('Bulk archive failed for', item.file.name, err);
+          fail++;
+        }
+      }
+    } catch (err) {
+      console.error('Bulk archive aborted', err);
+      fail = items.length - ok;
+    }
+
+    if (fail > 0) await refresh();
+    return { ok, fail };
   }, [online, refresh]);
 
   const setActiveSource = useCallback((index: number): void => {
@@ -310,5 +380,5 @@ export function useApp(online: boolean): {
     setState((s) => ({ ...s, pendingQueueCount: count }));
   }, []);
 
-  return { state, refresh, archiveFile, setActiveSource, refreshQueueCount };
+  return { state, refresh, archiveFile, archiveMany, setActiveSource, refreshQueueCount };
 }

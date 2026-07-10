@@ -3,6 +3,8 @@ import { AuthScreen } from './ui/AuthButton';
 import { SourceTabs } from './ui/SourceTabs';
 import { FileList } from './ui/FileList';
 import { QueueList } from './ui/QueueList';
+import { ArchiveList } from './ui/ArchiveList';
+import { SynthesisPanel } from './ui/SynthesisPanel';
 import { SearchBar } from './ui/SearchBar';
 import { CapturesList } from './ui/CapturesList';
 import { PlayerBar } from './ui/PlayerBar';
@@ -13,12 +15,13 @@ import { SettingsIcon, RefreshIcon, SearchIcon, SunIcon, MoonIcon } from './ui/i
 import { Wordmark } from './ui/Wordmark';
 import { Dashboard } from './ui/Dashboard';
 import { useTheme } from './hooks/useTheme';
-import { useApp } from './hooks/useApp';
+import { useApp, type Source } from './hooks/useApp';
 import { usePlayer } from './hooks/usePlayer';
 import { useOnline } from './hooks/useOnline';
 import { getLocalPlaybackState } from './state/driveState';
 import { getSettings } from './state/db';
 import { fetchMarkdownContent, extractPassage, appendCapture } from './drive/api';
+import { normalizeFolderName } from './state/archiveRules';
 import type { DriveFile } from './drive/types';
 
 export default function App(): React.JSX.Element {
@@ -28,6 +31,7 @@ export default function App(): React.JSX.Element {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [queueTabActive, setQueueTabActive] = useState(false);
   const [statsTabActive, setStatsTabActive] = useState(false);
+  const [archiveTabActive, setArchiveTabActive] = useState(false);
   const [activeRestTime, setActiveRestTime] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [capturesOpen, setCapturesOpen] = useState(false);
@@ -39,6 +43,9 @@ export default function App(): React.JSX.Element {
 
   const handleArchiveFromPlayer = useCallback(
     (fileId: string, fileName: string, sourceFolder: string) => {
+      // Un fichier déjà archivé (lecture depuis l'onglet Archive) ne doit pas
+      // être re-déplacé vers la semaine courante à 95 %
+      if (sourceFolder === 'Archive') return;
       void archiveFileRef.current(fileId, fileName, sourceFolder, '');
     },
     [],
@@ -51,7 +58,7 @@ export default function App(): React.JSX.Element {
     if (playerState.customQueue.length === 0) setQueueTabActive(false);
   }, [playerState.customQueue.length]);
 
-  const { state: appState, refresh, archiveFile, setActiveSource, refreshQueueCount } = useApp(online);
+  const { state: appState, refresh, archiveFile, archiveMany, setActiveSource, refreshQueueCount } = useApp(online);
 
   // Keep ref in sync
   useEffect(() => {
@@ -62,6 +69,15 @@ export default function App(): React.JSX.Element {
       return archiveFile(fileId, fileName, source?.folder.name ?? sourceFolder, source?.folder.id ?? '');
     };
   }, [appState.sources, archiveFile]);
+
+  const handlePlayArchived = useCallback(async (file: DriveFile, queue: DriveFile[], index: number): Promise<void> => {
+    const settings = await getSettings();
+    playerActions.setQueue(queue, 'Archive', index);
+    playerActions.setSpeed(settings.defaultSpeed);
+    playerActions.setSkipSeconds(settings.skipForwardSeconds);
+    const savedState = await getLocalPlaybackState(file.id);
+    await playerActions.loadAndPlay(file, 'Archive', savedState?.position ?? 0);
+  }, [playerActions]);
 
   const handlePlayFile = useCallback(async (file: DriveFile, index: number): Promise<void> => {
     const activeSource = appState.sources[appState.activeSourceIndex];
@@ -107,7 +123,7 @@ export default function App(): React.JSX.Element {
     });
   }, [playerState, appState.audioFolderId, appState.sources]);
 
-  const handlePlayFromSearch = useCallback(async (file: DriveFile, source: typeof appState.sources[number], fileIndex: number): Promise<void> => {
+  const handlePlayFromSearch = useCallback(async (file: DriveFile, source: Source, fileIndex: number): Promise<void> => {
     const sourceIndex = appState.sources.indexOf(source);
     if (sourceIndex >= 0) setActiveSource(sourceIndex);
     setQueueTabActive(false);
@@ -211,12 +227,14 @@ export default function App(): React.JSX.Element {
         <SourceTabs
           sources={appState.sources}
           activeIndex={appState.activeSourceIndex}
-          onSelect={(i) => { setQueueTabActive(false); setStatsTabActive(false); setActiveRestTime(null); setActiveSource(i); }}
+          onSelect={(i) => { setQueueTabActive(false); setStatsTabActive(false); setArchiveTabActive(false); setActiveRestTime(null); setActiveSource(i); }}
           queueCount={playerState.customQueue.length}
           queueActive={queueTabActive}
-          onQueueSelect={() => { setStatsTabActive(false); setQueueTabActive(true); }}
+          onQueueSelect={() => { setStatsTabActive(false); setArchiveTabActive(false); setQueueTabActive(true); }}
           statsActive={statsTabActive}
-          onStatsSelect={() => { setQueueTabActive(false); setStatsTabActive(true); }}
+          onStatsSelect={() => { setQueueTabActive(false); setArchiveTabActive(false); setStatsTabActive(true); }}
+          archiveActive={archiveTabActive}
+          onArchiveSelect={() => { setQueueTabActive(false); setStatsTabActive(false); setArchiveTabActive(true); }}
           activeRestTime={activeRestTime ?? undefined}
         />
 
@@ -234,6 +252,19 @@ export default function App(): React.JSX.Element {
             <div className="flex items-center justify-center py-16">
               <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
             </div>
+          ) : archiveTabActive ? (
+            appState.audioFolderId ? (
+              <ArchiveList
+                audioFolderId={appState.audioFolderId}
+                online={online}
+                onPlay={(file, queue, index) => void handlePlayArchived(file, queue, index)}
+                onUnarchived={() => void refresh()}
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center py-16" style={{ color: 'var(--text-3)' }}>
+                <p style={{ fontSize: 14 }}>Archive indisponible hors-ligne</p>
+              </div>
+            )
           ) : statsTabActive ? (
             <Dashboard />
           ) : queueTabActive ? (
@@ -252,20 +283,33 @@ export default function App(): React.JSX.Element {
               }}
             />
           ) : activeSource ? (
-            <FileList
-              files={activeSource.files}
-              sourceFolder={activeSource.folder.name}
-              sourceFolderId={activeSource.folder.id}
-              currentFileId={playerState.currentFile?.id ?? null}
-              onPlay={(file, index) => void handlePlayFile(file, index)}
-              onArchive={(file) => void handleArchive(file)}
-              onAddToQueue={(file) => {
-                playerActions.addToCustomQueue(file, activeSource.folder.name);
-              }}
-              isOnline={online}
-              onRefresh={() => void refresh()}
-              onRestTimeChange={(t) => setActiveRestTime(t)}
-            />
+            <>
+              {normalizeFolderName(activeSource.folder.name).startsWith('synthese') && (
+                <SynthesisPanel
+                  sources={appState.sources}
+                  online={online}
+                  onArchiveMany={async (items, weekKey) => {
+                    const result = await archiveMany(items, weekKey);
+                    await refreshQueueCount();
+                    return result;
+                  }}
+                />
+              )}
+              <FileList
+                files={activeSource.files}
+                sourceFolder={activeSource.folder.name}
+                sourceFolderId={activeSource.folder.id}
+                currentFileId={playerState.currentFile?.id ?? null}
+                onPlay={(file, index) => void handlePlayFile(file, index)}
+                onArchive={(file) => void handleArchive(file)}
+                onAddToQueue={(file) => {
+                  playerActions.addToCustomQueue(file, activeSource.folder.name);
+                }}
+                isOnline={online}
+                onRefresh={() => void refresh()}
+                onRestTimeChange={(t) => setActiveRestTime(t)}
+              />
+            </>
           ) : (
             <div className="flex flex-col items-center justify-center py-16" style={{ color: 'var(--text-3)' }}>
               <p style={{ fontSize: 14 }}>Créez des sous-dossiers dans Audio/ sur Drive</p>

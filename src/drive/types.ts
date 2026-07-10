@@ -45,6 +45,9 @@ export interface OfflineAction {
   sourceFolderId: string;
   audioFolderId: string;
   createdAt: number;
+  // Dossier hebdo de destination (ex "2026-S28") ; absent sur les actions
+  // enregistrées avant cette version → semaine courante au moment du flush
+  destWeekKey?: string;
 }
 
 export interface AppSettings {
