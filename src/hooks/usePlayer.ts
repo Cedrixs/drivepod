@@ -2,8 +2,9 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { player } from '../player/player';
 import { getSettings } from '../state/db';
 import { getLocalPlaybackState } from '../state/driveState';
+import { toast } from '../lib/toast';
 import type { DriveFile } from '../drive/types';
-import type { PlayerEvent, QueuedFile } from '../player/player';
+import type { PlayerEvent, QueuedFile, SleepTimer } from '../player/player';
 
 export interface PlayerHookState {
   currentFile: DriveFile | null;
@@ -18,9 +19,15 @@ export interface PlayerHookState {
   currentIndex: number;
   queue: DriveFile[];
   customQueue: QueuedFile[];
+  sleepTimer: SleepTimer | null;
+  // Réglage choisi par l'utilisateur (pour surligner la bonne pastille)
+  sleepChoice: SleepChoice;
 }
 
-export type { QueuedFile };
+export type { QueuedFile, SleepTimer };
+
+// Réglage du minuteur : minutes, fin de la piste en cours, ou aucun
+export type SleepChoice = number | 'track' | null;
 
 export interface PlayerActions {
   play: () => Promise<void>;
@@ -35,6 +42,7 @@ export interface PlayerActions {
   setSkipSeconds: (s: number) => void;
   setAutoRewind: (s: number) => void;
   setVoiceBoost: (enabled: boolean) => void;
+  setSleepTimer: (choice: SleepChoice) => void;
   // Démarre un fichier avec les réglages courants et sa position sauvegardée.
   // `queue` remplace la file de lecture du dossier ; omise, on garde l'actuelle.
   startPlayback: (file: DriveFile, sourceFolder: string, queue?: { files: DriveFile[]; index: number }) => Promise<void>;
@@ -56,6 +64,8 @@ const initialState: PlayerHookState = {
   currentIndex: -1,
   queue: [],
   customQueue: [],
+  sleepTimer: null,
+  sleepChoice: null,
 };
 
 export type ArchiveHandler = (file: DriveFile, sourceFolder: string) => void;
@@ -94,6 +104,11 @@ export function usePlayer(onArchive?: ArchiveHandler): { state: PlayerHookState;
           break;
         case 'error':
           setState((s) => ({ ...s, error: event.message, buffering: false }));
+          toast.error(`Lecture impossible : ${event.message}`);
+          break;
+        case 'sleeptimer':
+          setState((s) => ({ ...s, sleepTimer: event.timer, sleepChoice: event.timer ? s.sleepChoice : null }));
+          if (event.fired) toast.info('Minuteur de veille : lecture arrêtée');
           break;
         case 'trackchange':
           setState((s) => ({
@@ -141,6 +156,12 @@ export function usePlayer(onArchive?: ArchiveHandler): { state: PlayerHookState;
       setSkipSeconds,
       setAutoRewind: (s) => player.setAutoRewind(s),
       setVoiceBoost: (enabled) => player.setVoiceBoost(enabled),
+      setSleepTimer: (choice) => {
+        setState((s) => ({ ...s, sleepChoice: choice }));
+        if (choice === null) player.setSleepTimer(null);
+        else if (choice === 'track') player.setSleepTimer({ kind: 'track' });
+        else player.setSleepTimer({ kind: 'duration', endsAt: Date.now() + choice * 60_000 });
+      },
       startPlayback: async (file, sourceFolder, queue) => {
         const settings = await getSettings();
         if (queue) {

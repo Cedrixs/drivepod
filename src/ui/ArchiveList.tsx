@@ -3,6 +3,7 @@ import { findFolder, findOrCreateFolder, listSubfolders, listChildren, moveFile,
 import { ARCHIVE_FOLDER_NAME } from '../drive/archive';
 import { archiveGroupLabel } from '../state/archiveRules';
 import { formatDate, stripMp3 } from '../lib/format';
+import { toast } from '../lib/toast';
 import { PlayIcon, ChevronDownIcon, ChevronUpIcon } from './icons';
 import { CenteredSpinner, EmptyState, ErrorBox, IconButton } from './primitives';
 import type { DriveFile, DriveFolder } from '../drive/types';
@@ -90,9 +91,10 @@ export function ArchiveList({ audioFolderId, online, onPlay, onUnarchived }: Pro
         return next;
       });
       onUnarchived();
+      toast.success(`Remis dans ${entry.sourceName || 'Audio'}`);
     } catch (err) {
       console.error('Unarchive failed', err);
-      setError(`Désarchivage impossible pour ${stripMp3(entry.file.name)}`);
+      toast.error(`Désarchivage impossible pour « ${stripMp3(entry.file.name)} »`);
     } finally {
       setUnarchiving(null);
     }

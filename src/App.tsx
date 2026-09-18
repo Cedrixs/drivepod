@@ -14,6 +14,8 @@ import { OfflineBanner } from './ui/OfflineBanner';
 import { SettingsIcon, RefreshIcon, SearchIcon, SunIcon, MoonIcon } from './ui/icons';
 import { Wordmark } from './ui/Wordmark';
 import { Dashboard } from './ui/Dashboard';
+import { Toaster } from './ui/Toaster';
+import { toast } from './lib/toast';
 import { Spinner, CenteredSpinner, ErrorBox, EmptyState, IconButton } from './ui/primitives';
 import { useTheme } from './hooks/useTheme';
 import { useApp } from './hooks/useApp';
@@ -131,6 +133,7 @@ export default function App(): React.JSX.Element {
       return true;
     } catch (err) {
       console.error('Capture failed', err);
+      toast.error('Capture impossible, le passage n\'a pas été enregistré');
       return false;
     }
   }, [currentFile, playerState, appState.audioFolderId, findSourceOf]);
@@ -311,10 +314,13 @@ export default function App(): React.JSX.Element {
           isPlaying={playerState.isPlaying}
           position={playerState.position}
           duration={playerState.duration}
+          sleepActive={playerState.sleepTimer !== null}
           onPlayPause={player.togglePlay}
           onExpand={() => setOverlay('player')}
         />
       )}
+
+      <Toaster bottomOffset={currentFile && overlay !== 'player' ? 84 : 12} />
 
       {overlay === 'player' && currentFile && (
         <PlayerFull

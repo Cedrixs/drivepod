@@ -11,8 +11,13 @@ export interface QueuedFile {
   sourceFolder: string;
 }
 
+export type SleepTimer =
+  | { kind: 'duration'; endsAt: number }
+  | { kind: 'track' };
+
 export type PlayerEvent =
   | { type: 'timeupdate'; position: number; duration: number }
+  | { type: 'sleeptimer'; timer: SleepTimer | null; fired: boolean }
   | { type: 'play' }
   | { type: 'pause' }
   | { type: 'ended' }
@@ -33,6 +38,9 @@ const NETWORK_RETRY_DELAY_MS = 3_000;
 const REWIND_THRESHOLD_MS = 30_000;
 // Borne le temps d'écoute crédité entre deux sauvegardes (onglet gelé, veille)
 const MAX_ELAPSED_MS = 60_000;
+// Minuteur de veille : le volume baisse progressivement avant la pause
+const SLEEP_FADE_MS = 4_000;
+const SLEEP_FADE_STEP_MS = 100;
 
 class AudioPlayer {
   private audio: HTMLAudioElement;
@@ -50,6 +58,11 @@ class AudioPlayer {
   private objectUrl: string | null = null;
   private loadToken = 0;
   private advancing = false;
+
+  private sleepTimer: SleepTimer | null = null;
+  private sleepTimeout: ReturnType<typeof setTimeout> | null = null;
+  private fadeInterval: ReturnType<typeof setInterval> | null = null;
+  private fadeDone: ((completed: boolean) => void) | null = null;
 
   private speed = 1;
   private skipSeconds = 30;
@@ -140,6 +153,8 @@ class AudioPlayer {
       const dur = this.audio.duration || 0;
       this.emit({ type: 'timeupdate', position: pos, duration: dur });
       this.checkArchiveThreshold(pos, dur);
+      // Filet de sécurité si le setTimeout a été retardé par le navigateur en arrière-plan
+      if (this.sleepTimer?.kind === 'duration' && Date.now() >= this.sleepTimer.endsAt) void this.fireSleepTimer();
     });
 
     this.audio.addEventListener('play', () => {
@@ -156,6 +171,13 @@ class AudioPlayer {
 
     this.audio.addEventListener('ended', () => {
       this.emit({ type: 'ended' });
+      if (this.sleepTimer?.kind === 'track') {
+        // Fin de piste demandée : on s'arrête là, sans enchaîner
+        this.sleepTimer = null;
+        this.stopSaveTimer();
+        this.emit({ type: 'sleeptimer', timer: null, fired: true });
+        return;
+      }
       void this.playNext();
     });
 
@@ -343,9 +365,78 @@ class AudioPlayer {
     }
   }
 
+  // ── Minuteur de veille ────────────────────────────────────────────────────
+
+  getSleepTimer(): SleepTimer | null {
+    return this.sleepTimer;
+  }
+
+  setSleepTimer(timer: SleepTimer | null): void {
+    this.cancelSleepTimeout();
+    this.cancelFade();
+    this.sleepTimer = timer;
+    if (timer?.kind === 'duration') {
+      this.sleepTimeout = setTimeout(() => void this.fireSleepTimer(), Math.max(0, timer.endsAt - Date.now()));
+    }
+    this.emit({ type: 'sleeptimer', timer, fired: false });
+  }
+
+  private cancelSleepTimeout(): void {
+    if (this.sleepTimeout) {
+      clearTimeout(this.sleepTimeout);
+      this.sleepTimeout = null;
+    }
+  }
+
+  // Interrompt un fondu en cours (volume restauré) ; la promesse du fondu
+  // se résout alors avec false
+  private cancelFade(): void {
+    if (this.fadeInterval) {
+      clearInterval(this.fadeInterval);
+      this.fadeInterval = null;
+    }
+    this.audio.volume = 1;
+    const done = this.fadeDone;
+    this.fadeDone = null;
+    done?.(false);
+  }
+
+  private fadeOut(): Promise<boolean> {
+    this.cancelFade();
+    const steps = SLEEP_FADE_MS / SLEEP_FADE_STEP_MS;
+    let step = 0;
+    return new Promise((resolve) => {
+      this.fadeDone = resolve;
+      this.fadeInterval = setInterval(() => {
+        step++;
+        this.audio.volume = Math.max(0, 1 - step / steps);
+        if (step >= steps) {
+          clearInterval(this.fadeInterval!);
+          this.fadeInterval = null;
+          this.fadeDone = null;
+          resolve(true);
+        }
+      }, SLEEP_FADE_STEP_MS);
+    });
+  }
+
+  private async fireSleepTimer(): Promise<void> {
+    if (!this.sleepTimer) return;
+    this.sleepTimer = null;
+    this.cancelSleepTimeout();
+    this.emit({ type: 'sleeptimer', timer: null, fired: true });
+    if (this.audio.paused) return;
+    // Un play() pendant le fondu l'annule : on ne met pas en pause
+    const completed = await this.fadeOut();
+    if (!completed) return;
+    this.pause();
+    this.audio.volume = 1;
+  }
+
   // ── Contrôles ─────────────────────────────────────────────────────────────
 
   async play(): Promise<void> {
+    this.cancelFade();
     await this.resumeAudioContext();
     if (this.pausedAt !== null && this.autoRewindSeconds > 0) {
       if (Date.now() - this.pausedAt >= REWIND_THRESHOLD_MS) this.skip(-this.autoRewindSeconds);

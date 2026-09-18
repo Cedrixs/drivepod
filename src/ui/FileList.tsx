@@ -7,7 +7,14 @@ import { formatTime, formatDate, formatMinutes, stripMp3 } from '../lib/format';
 import { getAllPlaybackStates } from '../state/db';
 import { ARCHIVE_THRESHOLD } from '../player/player';
 import { EmptyState, PILL_STYLE } from './primitives';
+import { VirtualList } from './VirtualList';
+import { toast } from '../lib/toast';
 import type { DriveFile, PlaybackState } from '../drive/types';
+
+// Au-delà de ce nombre de lignes, seules les lignes visibles sont dans le DOM
+const VIRTUALIZE_FROM = 80;
+// Hauteur typique d'une ligne (titre sur une ligne, sans barre de progression)
+const ROW_ESTIMATE_PX = 78;
 
 // ── Tri & filtres ────────────────────────────────────────────────────────────
 
@@ -131,9 +138,14 @@ const FileItem = memo(function FileItem({
 
   const handleDownload = useCallback(async (): Promise<void> => {
     setDownloading(true);
-    try { await downloadForOffline(file, sourceFolder, sourceFolderId); setCached(true); }
-    catch (err) { console.error('Download failed', err); }
-    finally { setDownloading(false); }
+    try {
+      await downloadForOffline(file, sourceFolder, sourceFolderId);
+      setCached(true);
+      toast.success(`« ${stripMp3(file.name)} » disponible hors-ligne`);
+    } catch (err) {
+      console.error('Download failed', err);
+      toast.error(`Téléchargement de « ${stripMp3(file.name)} » impossible`);
+    } finally { setDownloading(false); }
   }, [file, sourceFolder, sourceFolderId]);
 
   const toggleSummary = useCallback(async (): Promise<void> => {
@@ -287,6 +299,8 @@ const FileItem = memo(function FileItem({
 
 // ── FileList ─────────────────────────────────────────────────────────────────
 
+const fileKey = (file: DriveFile): string => file.id;
+
 export interface LivePlayback {
   fileId: string;
   position: number;
@@ -362,6 +376,22 @@ export const FileList = memo(function FileList({
     onRestTimeChange?.(restTime);
   }, [restTime, onRestTimeChange]);
 
+  const renderRow = useCallback((file: DriveFile, i: number): React.ReactNode => (
+    <FileItem
+      key={file.id}
+      file={file}
+      isActive={file.id === currentFileId}
+      sourceFolder={sourceFolder}
+      sourceFolderId={sourceFolderId}
+      onPlay={onPlay}
+      onArchive={onArchive}
+      onAddToQueue={onAddToQueue}
+      fileIndex={i}
+      isOnline={isOnline}
+      playState={stateMap.get(file.id)}
+    />
+  ), [currentFileId, sourceFolder, sourceFolderId, onPlay, onArchive, onAddToQueue, isOnline, stateMap]);
+
   if (files.length === 0) {
     return (
       <EmptyState
@@ -415,22 +445,10 @@ export const FileList = memo(function FileList({
           action={{ label: 'Voir tous', onClick: () => setFilter('all') }}
           padding={48}
         />
+      ) : processed.length >= VIRTUALIZE_FROM ? (
+        <VirtualList items={processed} itemKey={fileKey} estimateHeight={ROW_ESTIMATE_PX} renderItem={renderRow} />
       ) : (
-        processed.map((file, i) => (
-          <FileItem
-            key={file.id}
-            file={file}
-            isActive={file.id === currentFileId}
-            sourceFolder={sourceFolder}
-            sourceFolderId={sourceFolderId}
-            onPlay={onPlay}
-            onArchive={onArchive}
-            onAddToQueue={onAddToQueue}
-            fileIndex={i}
-            isOnline={isOnline}
-            playState={stateMap.get(file.id)}
-          />
-        ))
+        processed.map(renderRow)
       )}
     </div>
   );

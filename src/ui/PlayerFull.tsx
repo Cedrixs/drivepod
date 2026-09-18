@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   PlayIcon, PauseIcon, SkipBackIcon, SkipForwardIcon,
-  ChevronDownIcon, ArchiveIcon, BookmarkIcon, CheckIcon,
+  ChevronDownIcon, ArchiveIcon, BookmarkIcon, CheckIcon, MoonIcon,
 } from './icons';
 import { fetchMarkdownContent } from '../drive/api';
 import { extractSummary } from '../lib/markdown';
 import { formatTime, abbrev, stripMp3 } from '../lib/format';
 import { PLAYBACK_SPEEDS } from '../drive/types';
 import { FullscreenPanel, IconButton } from './primitives';
-import type { PlayerHookState, PlayerActions } from '../hooks/usePlayer';
+import type { PlayerHookState, PlayerActions, SleepChoice, SleepTimer } from '../hooks/usePlayer';
 
 interface Props {
   playerState: PlayerHookState;
@@ -21,15 +21,38 @@ interface Props {
 
 type CaptureStatus = 'idle' | 'saving' | 'done' | 'failed';
 
+const SLEEP_CHOICES: { value: SleepChoice; label: string }[] = [
+  { value: null, label: 'Off' },
+  { value: 15, label: '15 min' },
+  { value: 30, label: '30 min' },
+  { value: 45, label: '45 min' },
+  { value: 60, label: '1 h' },
+  { value: 'track', label: 'Fin de piste' },
+];
+
+// Recalcule le temps restant chaque seconde tant qu'un minuteur court
+function useSleepRemaining(timer: SleepTimer | null): number | null {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (timer?.kind !== 'duration') return;
+    const id = setInterval(() => tick((n) => n + 1), 1_000);
+    return () => clearInterval(id);
+  }, [timer]);
+  if (timer?.kind !== 'duration') return null;
+  return Math.max(0, Math.round((timer.endsAt - Date.now()) / 1000));
+}
+
 export function PlayerFull({
   playerState, actions, onArchive, onCapture, onClose, sourceFolderId,
 }: Props): React.JSX.Element | null {
-  const { currentFile, sourceFolder, isPlaying, position, duration, speed, skipSeconds, buffering, error } = playerState;
+  const { currentFile, sourceFolder, isPlaying, position, duration, speed, skipSeconds, buffering, error, sleepTimer, sleepChoice } = playerState;
   const [summary, setSummary] = useState<string | null>(null);
   const [captureStatus, setCaptureStatus] = useState<CaptureStatus>('idle');
+  const [sleepOpen, setSleepOpen] = useState(false);
   // Position affichée pendant que l'utilisateur fait glisser la barre : les
   // timeupdate ne reprennent la main qu'au relâchement (pas de curseur qui saute)
   const [scrubPosition, setScrubPosition] = useState<number | null>(null);
+  const sleepRemaining = useSleepRemaining(sleepTimer);
 
   const currentFileName = currentFile?.name ?? null;
   useEffect(() => {
@@ -77,6 +100,11 @@ export function PlayerFull({
     : captureStatus === 'failed' ? 'var(--danger)'
       : captureStatus === 'saving' ? 'var(--accent)' : 'var(--text-3)';
 
+  const headerLabel = sleepTimer?.kind === 'track'
+    ? 'Arrêt en fin de piste'
+    : sleepRemaining !== null
+      ? `Veille dans ${formatTime(sleepRemaining)}`
+      : buffering ? 'Chargement' : 'En lecture';
   return (
     <FullscreenPanel className="select-none">
       {/* Header */}
@@ -84,10 +112,21 @@ export function PlayerFull({
         <IconButton label="Réduire le lecteur" onClick={onClose}>
           <ChevronDownIcon size={22} />
         </IconButton>
-        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 500, letterSpacing: '0.1em', color: 'var(--text-3)', textTransform: 'uppercase' }}>
-          {buffering ? 'Chargement' : 'En lecture'}
+        <span
+          aria-live="polite"
+          style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 500, letterSpacing: '0.1em', color: sleepTimer ? 'var(--accent)' : 'var(--text-3)', textTransform: 'uppercase', fontVariantNumeric: 'tabular-nums' }}
+        >
+          {headerLabel}
         </span>
         <div style={{ display: 'flex' }}>
+          <IconButton
+            label={sleepOpen ? 'Fermer le minuteur de veille' : 'Minuteur de veille'}
+            onClick={() => setSleepOpen((o) => !o)}
+            active={!!sleepTimer || sleepOpen}
+            aria-expanded={sleepOpen}
+          >
+            <MoonIcon size={20} />
+          </IconButton>
           <IconButton
             label={captureStatus === 'done' ? 'Passage capturé' : 'Capturer ce passage'}
             onClick={() => void handleCapture()}
@@ -101,6 +140,32 @@ export function PlayerFull({
           </IconButton>
         </div>
       </div>
+
+      {/* Minuteur de veille (repliable) */}
+      {sleepOpen && (
+        <div role="group" aria-label="Minuteur de veille" style={{ padding: '4px 24px 12px', display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center' }}>
+          {SLEEP_CHOICES.map((choice) => {
+            const active = choice.value === sleepChoice;
+            return (
+              <button
+                type="button"
+                key={String(choice.value)}
+                aria-pressed={active}
+                onClick={() => { actions.setSleepTimer(choice.value); if (choice.value !== null) setSleepOpen(false); }}
+                style={{
+                  height: 28, padding: '0 10px', borderRadius: 'var(--r-pill)',
+                  background: active ? 'var(--accent)' : 'var(--surface-2)',
+                  color: active ? 'var(--accent-text)' : 'var(--text-3)',
+                  border: 'none', cursor: 'pointer',
+                  fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 500, whiteSpace: 'nowrap',
+                }}
+              >
+                {choice.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Cote + titre */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '0 32px', gap: 20, minHeight: 0 }}>

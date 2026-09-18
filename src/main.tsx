@@ -5,6 +5,7 @@ import './index.css';
 import App from './App';
 import { getAccessToken, invalidateAccessToken } from './auth/auth';
 import { player } from './player/player';
+import { toast } from './lib/toast';
 
 // Délai avant d'appliquer une mise à jour après une pause : le temps qu'un
 // enchaînement automatique (fin de piste puis suivante) démarre, s'il y en a un
@@ -38,6 +39,7 @@ const updateSW = registerSW({
     document.addEventListener('visibilitychange', onVisibility);
 
     apply();
+    if (!done) toast.info('Mise à jour prête, elle s\'appliquera à la prochaine pause');
   },
 });
 

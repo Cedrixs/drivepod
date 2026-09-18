@@ -5,6 +5,7 @@ import { signOut } from '../auth/auth';
 import { clearAudioCache, getCacheStats } from '../offline/cache';
 import { initStateSync } from '../state/driveState';
 import { formatBytes, plural } from '../lib/format';
+import { toast } from '../lib/toast';
 import { FullscreenPanel, PanelHeader, CenteredSpinner } from './primitives';
 import { PLAYBACK_SPEEDS, SKIP_OPTIONS, AUTO_REWIND_OPTIONS, type AppSettings } from '../drive/types';
 
@@ -157,6 +158,10 @@ export function Settings({ onClose, audioFolderId, onResync, onSettingsChange, o
     try {
       await clearAudioCache();
       setCacheStats({ count: 0, totalSize: 0 });
+      toast.success('Cache hors-ligne vidé');
+    } catch (err) {
+      console.error('Clear cache failed', err);
+      toast.error('Impossible de vider le cache');
     } finally {
       setClearing(false);
     }
@@ -168,6 +173,10 @@ export function Settings({ onClose, audioFolderId, onResync, onSettingsChange, o
     try {
       await initStateSync(audioFolderId);
       onResync();
+      toast.success('Positions resynchronisées depuis Drive');
+    } catch (err) {
+      console.error('Resync failed', err);
+      toast.error('Resynchronisation impossible');
     } finally {
       setResyncing(false);
     }

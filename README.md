@@ -25,6 +25,7 @@ Lecteur audio PWA pour Google Drive. Lit vos MP3 depuis le dossier `Audio/` de v
 - Seek interactif (barre glissable)
 - Vitesses : 0.75×, 1×, 1.25×, 1.5×, 1.75×, 2×
 - Indicateur de buffering
+- **Minuteur de veille** : 15, 30, 45, 60 min ou fin de la piste en cours, avec fondu du volume avant la pause
 - Retry automatique 3 s après une erreur réseau (si online)
 - Lecture offline si le fichier est téléchargé en cache
 
@@ -43,7 +44,7 @@ Lecteur audio PWA pour Google Drive. Lit vos MP3 depuis le dossier `Audio/` de v
 ### Archivage
 
 - **Auto à 95 %** de progression → déplace le fichier vers `Archive/<AAAA-SNN>/<source>/` sur Drive (dossiers hebdo ISO, ex `2026-S28` ; les anciens dossiers mensuels `2026-05` restent lisibles)
-- **Manuel** depuis la liste ou le player plein écran
+- **Manuel** depuis la liste ou le player plein écran, avec **annulation** pendant quelques secondes (le fichier et sa position reviennent dans le dossier d'origine)
 - **Groupé depuis l'onglet Synthèses** : un bouton archive tous les audio antérieurs à la synthèse affichée (tous les onglets sauf Synthèses, Révision et Books), vers le dossier de la semaine de la synthèse
 - Passage automatique au fichier suivant après archivage
 - **File d'attente offline** : si hors-ligne, l'opération est enqueued et exécutée au retour online (la semaine de destination est mémorisée dans l'action)
@@ -75,7 +76,11 @@ Liste les audio archivés **groupés par semaine** (accordéon, chargement à la
 
 ### Affichage de la liste
 
-Pour chaque fichier : numéro d'ordre, titre, date de création, position / durée si déjà écouté, barre de progression, indicateur de cache, mise en surbrillance si en cours de lecture.
+Pour chaque fichier : numéro d'ordre, titre, date de création, position / durée si déjà écouté, barre de progression, indicateur de cache, mise en surbrillance si en cours de lecture. Au-delà de 80 fichiers, la liste est virtualisée (seules les lignes visibles sont dans le DOM).
+
+### Notifications
+
+Les actions qui peuvent échouer en arrière-plan (archivage, téléchargement, capture, resynchronisation, actions hors-ligne rejouées) remontent un toast en bas de l'écran. L'archivage propose « Annuler ».
 
 ### Réglages
 
@@ -224,8 +229,9 @@ src/
 ├── state/       db.ts (IndexedDB typé), driveState.ts (sync positions), captures.ts, listeningStats.ts, archiveRules.ts
 ├── player/      player.ts (<audio> + Web Audio + Media Session)
 ├── hooks/       useApp (sources, archivage), usePlayer (état du lecteur), useOnline, useTheme
-├── lib/         format.ts, markdown.ts, fuzzy.ts (fonctions pures, testées)
-└── ui/          composants ; primitives.tsx = spinner, états vides, boutons d'icône, panneaux plein écran
+├── lib/         format.ts, markdown.ts, fuzzy.ts, toast.ts, virtual.ts (fonctions pures, testées)
+└── ui/          composants ; primitives.tsx = spinner, états vides, boutons d'icône, panneaux plein écran ;
+                 Toaster.tsx (notifications), VirtualList.tsx (liste virtualisée)
 ```
 
 ### Authentification (PKCE + client_secret)
@@ -355,6 +361,7 @@ npm test
 - Client Drive (retry réseau, renouvellement sur 401, échappement des requêtes)
 - Résolution des dossiers d'archive (mémoïsation par lot, reprise après échec)
 - Helpers d'affichage, extraction Markdown, recherche floue
+- Store de notifications (durées, éviction), fenêtre de la liste virtualisée
 
 **Tests manuels requis (nécessitent hardware) :**
 - TC-1 : Connexion OAuth from scratch

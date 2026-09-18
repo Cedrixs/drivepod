@@ -38,9 +38,16 @@ export function createArchiveResolver(audioFolderId: string): ArchiveResolver {
   };
 }
 
-// Déplace un fichier vers son dossier d'archive et oublie sa position d'écoute
-export async function archiveOne(resolver: ArchiveResolver, target: ArchiveTarget): Promise<void> {
+// Déplace un fichier vers son dossier d'archive et oublie sa position
+// d'écoute. Retourne l'id du dossier de destination (pour annuler).
+export async function archiveOne(resolver: ArchiveResolver, target: ArchiveTarget): Promise<string> {
   const destId = await resolver.destination(target.weekKey, target.sourceFolder);
   await moveFile(target.fileId, target.sourceFolderId, destId);
   await removeFromStateAndSync(target.fileId);
+  return destId;
+}
+
+// Annulation : retour dans le dossier d'origine
+export function unarchiveOne(fileId: string, archiveFolderId: string, sourceFolderId: string): Promise<void> {
+  return moveFile(fileId, archiveFolderId, sourceFolderId);
 }

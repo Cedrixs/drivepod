@@ -2,12 +2,14 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { isAuthenticated, handleOAuthCallback, type OAuthCallbackResult } from '../auth/auth';
 import { listChildren, listSubfolders, findOrCreateFolder, getRootFolderId, AUDIO_MIME } from '../drive/api';
 import { isDriveApiError } from '../drive/client';
-import { createArchiveResolver, archiveOne, ARCHIVE_FOLDER_NAME } from '../drive/archive';
-import { initStateSync, setAudioFolderId } from '../state/driveState';
+import { createArchiveResolver, archiveOne, unarchiveOne, ARCHIVE_FOLDER_NAME } from '../drive/archive';
+import { initStateSync, setAudioFolderId, getLocalPlaybackState, saveStateWithSync } from '../state/driveState';
 import { flushOfflineQueue, getPendingQueueCount, queueArchive } from '../offline/queue';
 import { getSettings } from '../state/db';
 import { autoDownloadOldest, listCachedFilesMeta } from '../offline/cache';
 import { isoWeekKey, type BulkCandidate } from '../state/archiveRules';
+import { toast } from '../lib/toast';
+import { stripMp3, plural } from '../lib/format';
 import type { DriveFile, DriveFolder, Source } from '../drive/types';
 
 export type { Source };
@@ -143,8 +145,14 @@ export function useApp(online: boolean): { state: AppState; actions: AppActions 
     if (count === 0) return;
     setState((s) => ({ ...s, pendingQueueCount: count }));
     await flushOfflineQueue();
-    await refreshQueueCount();
-  }, [refreshQueueCount]);
+    const remaining = await getPendingQueueCount();
+    setState((s) => ({ ...s, pendingQueueCount: remaining }));
+    if (remaining > 0) {
+      toast.error(`${remaining} ${plural(remaining, 'action')} hors-ligne ${plural(remaining, "n'a", "n'ont")} pas pu être ${plural(remaining, 'rejouée')}`);
+    } else if (count > 0) {
+      toast.success(`${count} ${plural(count, 'action')} hors-ligne ${plural(count, 'rejouée')}`);
+    }
+  }, []);
 
   const refresh = useCallback(async (): Promise<void> => {
     const audioFolderId = audioFolderIdRef.current;
@@ -155,7 +163,10 @@ export function useApp(online: boolean): { state: AppState; actions: AppActions 
       const sources = await fetchSources(audioFolderId);
       setState((s) => ({ ...s, sources, refreshing: false }));
     } catch (err) {
-      setState((s) => ({ ...s, error: String(err), refreshing: false }));
+      // La liste précédente reste affichée : un toast suffit
+      console.warn('Refresh failed', err);
+      toast.error('Actualisation impossible, liste précédente conservée');
+      setState((s) => ({ ...s, refreshing: false }));
     } finally {
       refreshInFlight.current = false;
     }
@@ -272,6 +283,7 @@ export function useApp(online: boolean): { state: AppState; actions: AppActions 
 
     setState((s) => ({ ...s, sources: withoutFiles(s.sources, new Set([file.id])) }));
     const destWeekKey = isoWeekKey(new Date());
+    const title = stripMp3(file.name);
 
     if (!online) {
       await queueArchive({
@@ -279,15 +291,38 @@ export function useApp(online: boolean): { state: AppState; actions: AppActions 
         sourceFolder: source.name, sourceFolderId, audioFolderId, destWeekKey,
       });
       await refreshQueueCount();
+      toast.info(`« ${title} » sera archivé au retour du réseau`);
       return;
     }
 
+    // Position mémorisée avant l'archivage pour pouvoir la restaurer en cas d'annulation
+    const savedState = await getLocalPlaybackState(file.id).catch(() => undefined);
+
     try {
-      await archiveOne(createArchiveResolver(audioFolderId), {
+      const archiveFolderId = await archiveOne(createArchiveResolver(audioFolderId), {
         fileId: file.id, sourceFolder: source.name, sourceFolderId, weekKey: destWeekKey,
+      });
+      toast.success(`« ${title} » archivé`, {
+        action: {
+          label: 'Annuler',
+          onClick: () => {
+            void (async () => {
+              try {
+                await unarchiveOne(file.id, archiveFolderId, sourceFolderId);
+                if (savedState) await saveStateWithSync(savedState);
+                await refresh();
+                toast.info(`« ${title} » remis dans ${source.name}`);
+              } catch (err) {
+                console.error('Undo archive failed', err);
+                toast.error('Annulation impossible, le fichier reste archivé');
+              }
+            })();
+          },
+        },
       });
     } catch (err) {
       console.error('Archive failed', err);
+      toast.error(`Archivage de « ${title} » impossible`);
       await refresh();
     }
   }, [online, refresh, refreshQueueCount]);
@@ -316,6 +351,7 @@ export function useApp(online: boolean): { state: AppState; actions: AppActions 
         });
       }
       await refreshQueueCount();
+      toast.info(`${items.length} ${plural(items.length, 'archivage')} en attente du réseau`);
       return { ok: items.length, fail: 0 };
     }
 

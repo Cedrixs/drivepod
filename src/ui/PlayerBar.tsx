@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { PlayIcon, PauseIcon } from './icons';
+import { PlayIcon, PauseIcon, MoonIcon } from './icons';
 import { formatTime, abbrev, stripMp3 } from '../lib/format';
 import type { DriveFile } from '../drive/types';
 
@@ -9,12 +9,13 @@ interface Props {
   isPlaying: boolean;
   position: number;
   duration: number;
+  sleepActive?: boolean;
   onPlayPause: () => void;
   onExpand: () => void;
 }
 
 export const PlayerBar = memo(function PlayerBar({
-  file, sourceFolder, isPlaying, position, duration, onPlayPause, onExpand,
+  file, sourceFolder, isPlaying, position, duration, sleepActive = false, onPlayPause, onExpand,
 }: Props): React.JSX.Element {
   const progress = duration > 0 ? (position / duration) * 100 : 0;
 
@@ -44,8 +45,9 @@ export const PlayerBar = memo(function PlayerBar({
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, fontWeight: 500, lineHeight: 1, color: 'var(--accent)', letterSpacing: '0.06em' }}>
             {sourceFolder ? abbrev(sourceFolder) : '···'}
           </span>
-          <span className="tnum" style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 500, lineHeight: 1, color: 'var(--text-3)' }}>
+          <span className="tnum" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 500, lineHeight: 1, color: 'var(--text-3)' }}>
             {formatTime(position)}
+            {sleepActive && <MoonIcon size={10} style={{ color: 'var(--accent)' }} aria-label="Minuteur de veille actif" />}
           </span>
         </div>
 
