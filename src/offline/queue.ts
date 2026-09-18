@@ -4,50 +4,49 @@ import {
   getOfflineQueue,
   getOfflineQueueCount,
 } from '../state/db';
-import { findOrCreateFolder, moveFile } from '../drive/api';
-import { removeFromStateAndSync } from '../state/driveState';
+import { createArchiveResolver, archiveOne } from '../drive/archive';
 import { isoWeekKey } from '../state/archiveRules';
 import type { OfflineAction } from '../drive/types';
 
 export async function queueArchive(action: Omit<OfflineAction, 'id' | 'createdAt'>): Promise<void> {
-  const fullAction: OfflineAction = {
+  await enqueueOfflineAction({
     ...action,
     id: crypto.randomUUID(),
     createdAt: Date.now(),
-  };
-  await enqueueOfflineAction(fullAction);
+  });
 }
 
-export async function getPendingQueueCount(): Promise<number> {
+export function getPendingQueueCount(): Promise<number> {
   return getOfflineQueueCount();
 }
 
+// Rejoue les actions enregistrées hors-ligne, dans l'ordre. Une action qui
+// échoue reste en file pour la prochaine tentative.
 export async function flushOfflineQueue(
   onProgress?: (done: number, total: number) => void,
 ): Promise<void> {
   const queue = await getOfflineQueue();
-  const total = queue.length;
+  const resolvers = new Map<string, ReturnType<typeof createArchiveResolver>>();
 
   for (let i = 0; i < queue.length; i++) {
     const action = queue[i];
     try {
-      await executeAction(action);
+      let resolver = resolvers.get(action.audioFolderId);
+      if (!resolver) {
+        resolver = createArchiveResolver(action.audioFolderId);
+        resolvers.set(action.audioFolderId, resolver);
+      }
+      await archiveOne(resolver, {
+        fileId: action.fileId,
+        sourceFolder: action.sourceFolder,
+        sourceFolderId: action.sourceFolderId,
+        weekKey: action.destWeekKey ?? isoWeekKey(new Date()),
+      });
       await dequeueOfflineAction(action.id);
-      onProgress?.(i + 1, total);
+      onProgress?.(i + 1, queue.length);
     } catch (err) {
       console.warn(`Failed to execute queued action ${action.id}`, err);
     }
-  }
-}
-
-async function executeAction(action: OfflineAction): Promise<void> {
-  if (action.type === 'archive') {
-    const weekKey = action.destWeekKey ?? isoWeekKey(new Date());
-    const archiveFolderId = await findOrCreateFolder('Archive', action.audioFolderId);
-    const weekFolderId = await findOrCreateFolder(weekKey, archiveFolderId);
-    const sourceFolderId = await findOrCreateFolder(action.sourceFolder, weekFolderId);
-    await moveFile(action.fileId, action.sourceFolderId, sourceFolderId);
-    await removeFromStateAndSync(action.fileId);
   }
 }
 

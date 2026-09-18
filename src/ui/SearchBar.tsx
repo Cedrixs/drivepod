@@ -1,51 +1,9 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { XIcon, PlayIcon } from './icons';
-import type { Source } from '../hooks/useApp';
-import type { DriveFile } from '../drive/types';
-
-interface FuzzyResult {
-  file: DriveFile;
-  source: Source;
-  fileIndex: number;
-  score: number;
-  matchPositions: number[];
-}
-
-function fuzzySearch(query: string, sources: Source[]): FuzzyResult[] {
-  const q = query.toLowerCase().trim();
-  if (!q) return [];
-
-  const results: FuzzyResult[] = [];
-
-  for (const source of sources) {
-    for (let fi = 0; fi < source.files.length; fi++) {
-      const file = source.files[fi];
-      const title = file.name.replace(/\.mp3$/i, '');
-      const t = title.toLowerCase();
-
-      let qi = 0, score = 0, consecutive = 0;
-      const matchPos: number[] = [];
-
-      for (let ti = 0; ti < t.length && qi < q.length; ti++) {
-        if (t[ti] === q[qi]) {
-          score += 1 + consecutive * 2;
-          consecutive++;
-          matchPos.push(ti);
-          qi++;
-        } else {
-          consecutive = 0;
-        }
-      }
-
-      if (qi === q.length) {
-        if (matchPos[0] === 0) score += 10;
-        results.push({ file, source, fileIndex: fi, score, matchPositions: matchPos });
-      }
-    }
-  }
-
-  return results.sort((a, b) => b.score - a.score).slice(0, 30);
-}
+import { abbrev, stripMp3, plural } from '../lib/format';
+import { fuzzySearch } from '../lib/fuzzy';
+import { FullscreenPanel, IconButton, EmptyState } from './primitives';
+import type { Source, DriveFile } from '../drive/types';
 
 function HighlightedTitle({ title, positions }: { title: string; positions: number[] }): React.JSX.Element {
   const posSet = new Set(positions);
@@ -58,10 +16,6 @@ function HighlightedTitle({ title, positions }: { title: string; positions: numb
       )}
     </span>
   );
-}
-
-function abbrev(name: string): string {
-  return name.slice(0, 3).toUpperCase() + '.';
 }
 
 interface Props {
@@ -82,11 +36,7 @@ export function SearchBar({ sources, onPlay, onClose }: Props): React.JSX.Elemen
   const totalFiles = sources.reduce((n, s) => n + s.files.length, 0);
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex flex-col lg:inset-y-0 lg:left-1/2 lg:right-auto lg:w-[640px] lg:-translate-x-1/2"
-      style={{ background: 'var(--bg)', paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}
-    >
-      {/* Search input row */}
+    <FullscreenPanel>
       <div style={{
         display: 'flex', alignItems: 'center', gap: 10,
         padding: '8px 12px',
@@ -95,10 +45,15 @@ export function SearchBar({ sources, onPlay, onClose }: Props): React.JSX.Elemen
       }}>
         <input
           ref={inputRef}
-          type="text"
+          type="search"
+          aria-label="Rechercher un fichier"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder={`Rechercher dans ${totalFiles} fichiers…`}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') onClose();
+            if (e.key === 'Enter' && results[0]) { const r = results[0]; onPlay(r.file, r.source, r.fileIndex); onClose(); }
+          }}
+          placeholder={`Rechercher dans ${totalFiles} ${plural(totalFiles, 'fichier')}…`}
           style={{
             flex: 1, height: 38, padding: '0 14px',
             borderRadius: 'var(--r-lg)',
@@ -107,41 +62,25 @@ export function SearchBar({ sources, onPlay, onClose }: Props): React.JSX.Elemen
             outline: 'none',
           }}
         />
-        <button
-          onClick={onClose}
-          style={{
-            width: 44, height: 44, flexShrink: 0,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: 'none', border: 'none', cursor: 'pointer',
-            color: 'var(--text-3)', borderRadius: 10,
-          }}
-        >
+        <IconButton label="Fermer la recherche" onClick={onClose}>
           <XIcon size={20} />
-        </button>
+        </IconButton>
       </div>
 
-      {/* Results */}
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {!query.trim() ? (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '64px 0' }}>
-            <p style={{ fontFamily: 'var(--font-sans)', fontSize: 14, color: 'var(--text-3)' }}>
-              Tapez pour rechercher dans tous les dossiers
-            </p>
-          </div>
+          <EmptyState title="Tapez pour rechercher dans tous les dossiers" />
         ) : results.length === 0 ? (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '64px 0' }}>
-            <p style={{ fontFamily: 'var(--font-sans)', fontSize: 14, color: 'var(--text-3)' }}>
-              Aucun résultat pour « {query} »
-            </p>
-          </div>
+          <EmptyState title={`Aucun résultat pour « ${query} »`} />
         ) : (
           <>
             <div style={{ padding: '8px 16px 4px', fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 500, color: 'var(--text-4)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-              {results.length} résultat{results.length > 1 ? 's' : ''}
+              {results.length} {plural(results.length, 'résultat')}
             </div>
-            {results.map((r, i) => (
+            {results.map((r) => (
               <button
-                key={`${r.file.id}-${i}`}
+                type="button"
+                key={r.file.id}
                 onClick={() => { onPlay(r.file, r.source, r.fileIndex); onClose(); }}
                 style={{
                   width: '100%', display: 'flex', alignItems: 'center', gap: 12,
@@ -151,7 +90,6 @@ export function SearchBar({ sources, onPlay, onClose }: Props): React.JSX.Elemen
                   cursor: 'pointer', textAlign: 'left',
                 }}
               >
-                {/* Source abbrev */}
                 <span style={{
                   fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 500,
                   color: 'var(--accent)', background: 'var(--accent-soft)',
@@ -161,27 +99,22 @@ export function SearchBar({ sources, onPlay, onClose }: Props): React.JSX.Elemen
                   {abbrev(r.source.folder.name)}
                 </span>
 
-                {/* Title */}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <p style={{
                     fontFamily: 'var(--font-sans)', fontSize: 14, fontWeight: 500,
                     color: 'var(--text-1)', lineHeight: 1.3,
                     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                   }}>
-                    <HighlightedTitle
-                      title={r.file.name.replace(/\.mp3$/i, '')}
-                      positions={r.matchPositions}
-                    />
+                    <HighlightedTitle title={stripMp3(r.file.name)} positions={r.matchPositions} />
                   </p>
                 </div>
 
-                {/* Play indicator */}
                 <PlayIcon size={14} style={{ color: 'var(--text-4)', flexShrink: 0 }} />
               </button>
             ))}
           </>
         )}
       </div>
-    </div>
+    </FullscreenPanel>
   );
 }

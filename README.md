@@ -204,9 +204,29 @@ Le token OAuth est stocké dans le Cache API (`dp-sw-tokens`) par le code de la 
 Le SW est un fichier TypeScript custom (`src/sw.ts`) compilé via vite-plugin-pwa en mode `injectManifest`. Il gère :
 - **Précache Workbox** : tous les assets JS/CSS/HTML sont mis en cache à l'installation
 - **Proxy audio** : `/drivepod/stream/:id` → Drive API authentifié
-- **Drive API** : NetworkFirst avec cache 5 min pour les listes de fichiers
+- **Drive API** : NetworkFirst avec cache 5 min pour les listes de fichiers (les contenus `alt=media` sont exclus : MP3, fichiers d'état)
 - **OAuth endpoints** : NetworkOnly (jamais mis en cache)
 - **Navigation SPA** : fallback vers `index.html` précaché
+
+### Mise à jour de l'app
+
+vite-plugin-pwa est en mode `prompt` : le nouveau SW est téléchargé mais attend. `src/main.tsx` l'active
+(`SKIP_WAITING`) dès qu'aucune lecture n'est en cours (au démarrage, à la pause, ou quand l'app passe en
+arrière-plan), puis la page se recharge sur la nouvelle version. Une écoute n'est jamais coupée par une mise à jour.
+
+### Structure du code
+
+```
+src/
+├── auth/        OAuth PKCE, tokens (auth.ts)
+├── drive/       client.ts (fetch authentifié + retry), api.ts (fichiers/dossiers), archive.ts (Archive/<semaine>/<source>)
+├── offline/     cache.ts (MP3 hors-ligne), queue.ts (actions différées)
+├── state/       db.ts (IndexedDB typé), driveState.ts (sync positions), captures.ts, listeningStats.ts, archiveRules.ts
+├── player/      player.ts (<audio> + Web Audio + Media Session)
+├── hooks/       useApp (sources, archivage), usePlayer (état du lecteur), useOnline, useTheme
+├── lib/         format.ts, markdown.ts, fuzzy.ts (fonctions pures, testées)
+└── ui/          composants ; primitives.tsx = spinner, états vides, boutons d'icône, panneaux plein écran
+```
 
 ### Authentification (PKCE + client_secret)
 
@@ -275,13 +295,10 @@ pleine écoute (session > 1 h), le SW répond au 401 de Drive en demandant à la
 
 **Symptôme :** lecture bloquée à 0:00 après une mise à jour de l'app.
 
-**Cause :** l'ancien Service Worker est encore actif. Le nouveau SW avec le proxy audio n'est pas encore installé.
+**Cause :** l'ancien Service Worker est encore actif. Le nouveau SW attend qu'aucune lecture ne soit en cours pour s'activer.
 
-**Solution :**
-1. DevTools → Application → Service Workers → **Unregister**
-2. Rechargez la page (le nouveau SW s'installe et recharge automatiquement)
-
-Ou plus simplement : attendez quelques minutes, l'app se rechargera automatiquement via `onNeedRefresh`.
+**Solution :** mettez en pause ou passez l'app en arrière-plan quelques secondes, la page se recharge sur la nouvelle version.
+Si le problème persiste : DevTools → Application → Service Workers → **Unregister**, puis rechargez.
 
 ### "Échange de token échoué : 400 client_secret is missing"
 
@@ -334,6 +351,10 @@ npm test
 - TC-6 : Queue offline
 - TC-7 : Archive manuelle → passe au suivant
 - TC-8 : Expiration de token
+- Règles d'archivage (semaine ISO, sélection groupée, libellés)
+- Client Drive (retry réseau, renouvellement sur 401, échappement des requêtes)
+- Résolution des dossiers d'archive (mémoïsation par lot, reprise après échec)
+- Helpers d'affichage, extraction Markdown, recherche floue
 
 **Tests manuels requis (nécessitent hardware) :**
 - TC-1 : Connexion OAuth from scratch

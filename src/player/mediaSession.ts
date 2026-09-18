@@ -8,12 +8,21 @@ export interface MediaSessionHandlers {
   onSeekForward: (offset: number) => void;
 }
 
+const ACTIONS: MediaSessionAction[] = [
+  'play', 'pause', 'previoustrack', 'nexttrack', 'seekto', 'seekbackward', 'seekforward',
+];
+
+function hasMediaSession(): boolean {
+  return typeof navigator !== 'undefined' && 'mediaSession' in navigator;
+}
+
 export function setupMediaSession(
   title: string,
   source: string,
   handlers: MediaSessionHandlers,
+  defaultSkipSeconds = 30,
 ): void {
-  if (!('mediaSession' in navigator)) return;
+  if (!hasMediaSession()) return;
 
   navigator.mediaSession.metadata = new MediaMetadata({
     title,
@@ -25,19 +34,19 @@ export function setupMediaSession(
     ],
   });
 
-  navigator.mediaSession.setActionHandler('play', handlers.onPlay);
-  navigator.mediaSession.setActionHandler('pause', handlers.onPause);
-  navigator.mediaSession.setActionHandler('previoustrack', handlers.onPrevious);
-  navigator.mediaSession.setActionHandler('nexttrack', handlers.onNext);
-  navigator.mediaSession.setActionHandler('seekto', (details) => {
+  const bind = (action: MediaSessionAction, handler: MediaSessionActionHandler): void => {
+    try { navigator.mediaSession.setActionHandler(action, handler); } catch { /* action non supportée */ }
+  };
+
+  bind('play', handlers.onPlay);
+  bind('pause', handlers.onPause);
+  bind('previoustrack', handlers.onPrevious);
+  bind('nexttrack', handlers.onNext);
+  bind('seekto', (details) => {
     if (details.seekTime !== undefined) handlers.onSeekTo(details.seekTime);
   });
-  navigator.mediaSession.setActionHandler('seekbackward', (details) => {
-    handlers.onSeekBackward(details.seekOffset ?? 30);
-  });
-  navigator.mediaSession.setActionHandler('seekforward', (details) => {
-    handlers.onSeekForward(details.seekOffset ?? 30);
-  });
+  bind('seekbackward', (details) => handlers.onSeekBackward(details.seekOffset ?? defaultSkipSeconds));
+  bind('seekforward', (details) => handlers.onSeekForward(details.seekOffset ?? defaultSkipSeconds));
 }
 
 export function updateMediaSessionState(
@@ -46,29 +55,25 @@ export function updateMediaSessionState(
   duration?: number,
   playbackRate?: number,
 ): void {
-  if (!('mediaSession' in navigator)) return;
+  if (!hasMediaSession()) return;
   navigator.mediaSession.playbackState = state;
-  if (position !== undefined && duration !== undefined) {
-    try {
-      navigator.mediaSession.setPositionState({
-        duration,
-        position: Math.min(position, duration),
-        playbackRate: playbackRate ?? 1,
-      });
-    } catch {
-      // not all browsers support setPositionState
-    }
+  if (position === undefined || duration === undefined || !isFinite(duration) || duration <= 0) return;
+  try {
+    navigator.mediaSession.setPositionState({
+      duration,
+      position: Math.max(0, Math.min(position, duration)),
+      playbackRate: playbackRate ?? 1,
+    });
+  } catch {
+    // setPositionState absent ou valeurs refusées par le navigateur
   }
 }
 
 export function clearMediaSession(): void {
-  if (!('mediaSession' in navigator)) return;
+  if (!hasMediaSession()) return;
   navigator.mediaSession.metadata = null;
   navigator.mediaSession.playbackState = 'none';
-  const handlers: MediaSessionAction[] = [
-    'play', 'pause', 'previoustrack', 'nexttrack', 'seekto', 'seekbackward', 'seekforward',
-  ];
-  for (const action of handlers) {
+  for (const action of ACTIONS) {
     try { navigator.mediaSession.setActionHandler(action, null); } catch { /* ignore */ }
   }
 }

@@ -1,8 +1,7 @@
-import type { DriveFile } from '../drive/types';
-import type { Source } from '../hooks/useApp';
+import type { DriveFile, Source } from '../drive/types';
 
 // Clé de semaine ISO 8601 (lundi–dimanche, règle du jeudi), ex : "2026-S28".
-// Sert de nom aux dossiers Drive Archive/<clé>/ — le tri lexicographique
+// Sert de nom aux dossiers Drive Archive/<clé>/ : le tri lexicographique
 // correspond au tri chronologique.
 export function isoWeekKey(d: Date): string {
   const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
@@ -41,7 +40,7 @@ export interface BulkCandidate {
 }
 
 // Fichiers à archiver en masse : tout MP3 créé avant la date de la synthèse,
-// dans tous les onglets sauf ceux exclus — écoutés ou non.
+// dans tous les onglets sauf ceux exclus : écoutés ou non.
 export function selectFilesToBulkArchive(sources: Source[], cutoffTime: string): BulkCandidate[] {
   const cutoff = new Date(cutoffTime).getTime();
   if (!isFinite(cutoff)) return [];

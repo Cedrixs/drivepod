@@ -1,31 +1,21 @@
+import { memo } from 'react';
 import { PlayIcon, PauseIcon } from './icons';
-import type { PlayerHookState } from '../hooks/usePlayer';
+import { formatTime, abbrev, stripMp3 } from '../lib/format';
+import type { DriveFile } from '../drive/types';
 
 interface Props {
-  playerState: PlayerHookState;
-  sourceFolder?: string;
+  file: DriveFile;
+  sourceFolder: string;
+  isPlaying: boolean;
+  position: number;
+  duration: number;
   onPlayPause: () => void;
   onExpand: () => void;
 }
 
-function fmtTime(secs: number): string {
-  if (!isFinite(secs) || secs < 0) return '0:00';
-  const h = Math.floor(secs / 3600);
-  const m = Math.floor((secs % 3600) / 60);
-  const s = Math.floor(secs % 60);
-  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-  return `${m}:${String(s).padStart(2, '0')}`;
-}
-
-function abbrev(name: string): string {
-  return name.slice(0, 3).toUpperCase() + '.';
-}
-
-export function PlayerBar({ playerState, sourceFolder, onPlayPause, onExpand }: Props): React.JSX.Element | null {
-  const { currentFile, isPlaying, position, duration } = playerState;
-  if (!currentFile) return null;
-
-  const title = currentFile.name.replace(/\.mp3$/i, '');
+export const PlayerBar = memo(function PlayerBar({
+  file, sourceFolder, isPlaying, position, duration, onPlayPause, onExpand,
+}: Props): React.JSX.Element {
   const progress = duration > 0 ? (position / duration) * 100 : 0;
 
   return (
@@ -34,6 +24,9 @@ export function PlayerBar({ playerState, sourceFolder, onPlayPause, onExpand }: 
       style={{ bottom: 'calc(8px + env(safe-area-inset-bottom))' }}
     >
       <div
+        role="button"
+        tabIndex={0}
+        aria-label="Ouvrir le lecteur"
         className="flex items-center border border-border-1 cursor-pointer"
         style={{
           gap: 12,
@@ -44,35 +37,35 @@ export function PlayerBar({ playerState, sourceFolder, onPlayPause, onExpand }: 
           boxShadow: 'var(--shadow-2)',
         }}
         onClick={onExpand}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onExpand(); } }}
       >
-        {/* Côte de bibliothèque — source abbrev + timestamp */}
+        {/* Cote de bibliothèque : source + timestamp */}
         <div className="flex flex-col items-start flex-shrink-0" style={{ gap: 2, paddingRight: 4 }}>
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, fontWeight: 500, lineHeight: 1, color: 'var(--accent)', letterSpacing: '0.06em' }}>
             {sourceFolder ? abbrev(sourceFolder) : '···'}
           </span>
           <span className="tnum" style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 500, lineHeight: 1, color: 'var(--text-3)' }}>
-            {fmtTime(position)}
+            {formatTime(position)}
           </span>
         </div>
 
-        {/* Séparateur */}
         <div className="self-stretch" style={{ width: 1, background: 'var(--border-1)' }} />
 
-        {/* Titre + barre de progression */}
         <div className="flex-1 min-w-0 flex flex-col" style={{ gap: 5 }}>
           <p style={{ fontFamily: 'var(--font-sans)', fontSize: 13, fontWeight: 500, lineHeight: 1.2, color: 'var(--text-1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', margin: 0 }}>
-            {title}
+            {stripMp3(file.name)}
           </p>
           <div style={{ height: 2, background: 'var(--surface-3)', borderRadius: 1, overflow: 'hidden' }}>
             <div style={{ width: `${progress}%`, height: '100%', background: 'var(--accent)', borderRadius: 1, transition: 'width 1s linear' }} />
           </div>
         </div>
 
-        {/* Bouton play/pause 40×40 */}
         <button
+          type="button"
+          aria-label={isPlaying ? 'Pause' : 'Lecture'}
           onClick={(e) => { e.stopPropagation(); onPlayPause(); }}
           className="flex items-center justify-center flex-shrink-0 active:scale-95 transition-transform"
-          style={{ width: 40, height: 40, borderRadius: 20, background: 'var(--accent)', color: 'var(--accent-text)', border: 'none' }}
+          style={{ width: 40, height: 40, borderRadius: 20, background: 'var(--accent)', color: 'var(--accent-text)', border: 'none', cursor: 'pointer' }}
         >
           {isPlaying
             ? <PauseIcon size={18} />
@@ -82,4 +75,4 @@ export function PlayerBar({ playerState, sourceFolder, onPlayPause, onExpand }: 
       </div>
     </div>
   );
-}
+});

@@ -1,11 +1,7 @@
 import { getDB } from './db';
+import type { ListeningDay } from '../drive/types';
 
-export interface ListeningDay {
-  date: string;
-  totalMinutes: number;
-  bySource: Record<string, number>;
-  filesCompleted: number;
-}
+export type { ListeningDay };
 
 export interface DashboardStats {
   todayMinutes: number;
@@ -15,41 +11,45 @@ export interface DashboardStats {
   bySource: Record<string, number>;
 }
 
-function todayStr(): string {
-  return new Date().toISOString().slice(0, 10);
+function dayKey(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+function emptyDay(date: string): ListeningDay {
+  return { date, totalMinutes: 0, bySource: {}, filesCompleted: 0 };
+}
+
+async function updateToday(mutate: (day: ListeningDay) => void): Promise<void> {
+  const db = await getDB();
+  const date = dayKey(new Date());
+  const day = (await db.get('listeningLog', date)) ?? emptyDay(date);
+  mutate(day);
+  await db.put('listeningLog', day, date);
 }
 
 export async function logListeningTime(sourceFolder: string, seconds: number): Promise<void> {
   if (seconds <= 0 || !sourceFolder) return;
-  const db = await getDB();
-  const date = todayStr();
-  const existing = await db.get('listeningLog', date) as ListeningDay | undefined;
-  const day: ListeningDay = existing ?? { date, totalMinutes: 0, bySource: {}, filesCompleted: 0 };
   const minutes = seconds / 60;
-  day.totalMinutes += minutes;
-  day.bySource[sourceFolder] = (day.bySource[sourceFolder] ?? 0) + minutes;
-  await db.put('listeningLog', day, date);
+  await updateToday((day) => {
+    day.totalMinutes += minutes;
+    day.bySource[sourceFolder] = (day.bySource[sourceFolder] ?? 0) + minutes;
+  });
 }
 
-export async function logFileCompleted(_sourceFolder: string): Promise<void> {
-  const db = await getDB();
-  const date = todayStr();
-  const existing = await db.get('listeningLog', date) as ListeningDay | undefined;
-  const day: ListeningDay = existing ?? { date, totalMinutes: 0, bySource: {}, filesCompleted: 0 };
-  day.filesCompleted += 1;
-  await db.put('listeningLog', day, date);
+export async function logFileCompleted(): Promise<void> {
+  await updateToday((day) => { day.filesCompleted += 1; });
 }
 
 export async function getAllListeningDays(): Promise<ListeningDay[]> {
   const db = await getDB();
-  return db.getAll('listeningLog') as Promise<ListeningDay[]>;
+  return db.getAll('listeningLog');
 }
 
 export function computeStats(days: ListeningDay[]): DashboardStats {
-  const today = todayStr();
+  const today = dayKey(new Date());
   const weekAgo = new Date();
   weekAgo.setDate(weekAgo.getDate() - 6);
-  const weekAgoStr = weekAgo.toISOString().slice(0, 10);
+  const weekAgoStr = dayKey(weekAgo);
   const monthPrefix = today.slice(0, 7);
 
   let todayMinutes = 0;
@@ -68,12 +68,11 @@ export function computeStats(days: ListeningDay[]): DashboardStats {
     if (day.totalMinutes > 0) datesWithListening.add(day.date);
   }
 
-  // Streak: consecutive days ending today (or yesterday if nothing today yet)
+  // Série : jours consécutifs jusqu'à aujourd'hui (ou hier si rien encore aujourd'hui)
   let streak = 0;
   const cursor = new Date();
-  // If no listening today, start from yesterday
   if (!datesWithListening.has(today)) cursor.setDate(cursor.getDate() - 1);
-  while (datesWithListening.has(cursor.toISOString().slice(0, 10))) {
+  while (datesWithListening.has(dayKey(cursor))) {
     streak++;
     cursor.setDate(cursor.getDate() - 1);
   }

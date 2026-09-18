@@ -1,3 +1,4 @@
+import { clientsClaim } from 'workbox-core';
 import { precacheAndRoute, cleanupOutdatedCaches, createHandlerBoundToURL } from 'workbox-precaching';
 import { registerRoute, NavigationRoute } from 'workbox-routing';
 import { NetworkFirst, NetworkOnly } from 'workbox-strategies';
@@ -7,34 +8,49 @@ declare const self: ServiceWorkerGlobalScope & {
   __WB_MANIFEST: Array<{ url: string; revision: string | null }>;
 };
 
+const SW_TOKEN_CACHE = 'dp-sw-tokens';
+const SW_TOKEN_KEY = '/sw-token';
+const STREAM_PREFIX = '/drivepod/stream/';
+const TOKEN_REFRESH_WAIT_MS = 2_500;
+
 precacheAndRoute(self.__WB_MANIFEST);
 cleanupOutdatedCaches();
+
+// Activation contrôlée par la page (mode "prompt" de vite-plugin-pwa) : elle
+// envoie SKIP_WAITING quand aucune lecture n'est en cours, puis on prend la
+// main sur les onglets ouverts pour que la page se recharge sur la nouvelle version.
+self.addEventListener('message', (event) => {
+  if ((event.data as { type?: string } | null)?.type === 'SKIP_WAITING') void self.skipWaiting();
+});
+clientsClaim();
 
 // SPA navigation fallback
 const navHandler = createHandlerBoundToURL('/drivepod/index.html');
 registerRoute(new NavigationRoute(navHandler, { denylist: [/^\/api/, /\?code=/] }));
 
-// Audio auth proxy: intercept /drivepod/stream/:fileId, add Bearer token, proxy to Drive
+async function readCachedToken(): Promise<string | null> {
+  const tokenCache = await caches.open(SW_TOKEN_CACHE);
+  const tokenResp = await tokenCache.match(SW_TOKEN_KEY);
+  if (!tokenResp) return null;
+  const { token } = (await tokenResp.json()) as { token: string };
+  return token;
+}
+
+// Proxy audio : /drivepod/stream/:fileId reçoit le header Bearer puis part vers Drive
 registerRoute(
-  ({ url }: { url: URL }) => url.pathname.startsWith('/drivepod/stream/'),
+  ({ url }: { url: URL }) => url.pathname.startsWith(STREAM_PREFIX),
   async ({ request, url }: { request: Request; url: URL }): Promise<Response> => {
-    const fileId = url.pathname.replace('/drivepod/stream/', '');
+    const fileId = url.pathname.slice(STREAM_PREFIX.length);
 
     const fetchWithCachedToken = async (): Promise<Response | null> => {
-      const tokenCache = await caches.open('dp-sw-tokens');
-      const tokenResp = await tokenCache.match('/sw-token');
-      if (!tokenResp) return null;
+      const token = await readCachedToken();
+      if (!token) return null;
 
-      const { token } = (await tokenResp.json()) as { token: string };
       const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
-
       const range = request.headers.get('Range');
       if (range) headers['Range'] = range;
 
-      return fetch(
-        `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
-        { headers },
-      );
+      return fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, { headers });
     };
 
     try {
@@ -46,7 +62,7 @@ registerRoute(
       if (resp.status === 401) {
         const clients = await self.clients.matchAll();
         for (const client of clients) client.postMessage({ type: 'DP_TOKEN_EXPIRED' });
-        await new Promise((r) => setTimeout(r, 2_500));
+        await new Promise((r) => setTimeout(r, TOKEN_REFRESH_WAIT_MS));
         resp = (await fetchWithCachedToken()) ?? resp;
       }
 
@@ -57,13 +73,18 @@ registerRoute(
   },
 );
 
-// OAuth endpoints — never cache
+// OAuth endpoints : jamais mis en cache
 registerRoute(/^https:\/\/accounts\.google\.com\/.*/i, new NetworkOnly());
 registerRoute(/^https:\/\/oauth2\.googleapis\.com\/.*/i, new NetworkOnly());
 
-// Drive API (list/metadata calls) — cache with NetworkFirst
+// Listes et métadonnées Drive : NetworkFirst avec cache court. Les contenus
+// (alt=media : MP3 téléchargés, fichiers d'état, markdown) sont exclus : ils
+// rempliraient ce cache de blobs audio et serviraient des états périmés.
 registerRoute(
-  /^https:\/\/www\.googleapis\.com\/drive\/.*/i,
+  ({ url }: { url: URL }) =>
+    url.hostname === 'www.googleapis.com'
+    && url.pathname.startsWith('/drive/')
+    && url.searchParams.get('alt') !== 'media',
   new NetworkFirst({
     cacheName: 'drive-api-cache',
     networkTimeoutSeconds: 10,

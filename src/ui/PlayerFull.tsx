@@ -1,110 +1,108 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   PlayIcon, PauseIcon, SkipBackIcon, SkipForwardIcon,
-  ChevronDownIcon, ArchiveIcon, BookmarkIcon,
+  ChevronDownIcon, ArchiveIcon, BookmarkIcon, CheckIcon,
 } from './icons';
-import { fetchMarkdownContent, extractSummary } from '../drive/api';
-import type { PlayerHookState } from '../hooks/usePlayer';
+import { fetchMarkdownContent } from '../drive/api';
+import { extractSummary } from '../lib/markdown';
+import { formatTime, abbrev, stripMp3 } from '../lib/format';
+import { PLAYBACK_SPEEDS } from '../drive/types';
+import { FullscreenPanel, IconButton } from './primitives';
+import type { PlayerHookState, PlayerActions } from '../hooks/usePlayer';
 
 interface Props {
   playerState: PlayerHookState;
-  onPlayPause: () => void;
-  onNext: () => Promise<void>;
-  onPrevious: () => Promise<void>;
-  onSeek: (t: number) => void;
-  onSkipForward: (s: number) => void;
-  onSkipBackward: (s: number) => void;
-  onSetSpeed: (s: number) => void;
+  actions: PlayerActions;
   onArchive: () => void;
-  onCapture: () => void;
+  onCapture: () => Promise<boolean>;
   onClose: () => void;
-  skipSeconds: number;
   sourceFolderId?: string;
-  sourceFolder?: string;
 }
 
-const SPEEDS = [0.75, 1, 1.25, 1.5, 1.75, 2] as const;
-
-function formatTime(seconds: number): string {
-  if (!isFinite(seconds) || seconds <= 0) return '0:00';
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = Math.floor(seconds % 60);
-  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-  return `${m}:${String(s).padStart(2, '0')}`;
-}
-
-function abbrev(name: string): string {
-  return name.slice(0, 3).toUpperCase() + '.';
-}
-
-const BTN: React.CSSProperties = {
-  width: 44, height: 44, borderRadius: 10,
-  display: 'flex', alignItems: 'center', justifyContent: 'center',
-  background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)',
-};
+type CaptureStatus = 'idle' | 'saving' | 'done' | 'failed';
 
 export function PlayerFull({
-  playerState, onPlayPause, onNext, onPrevious,
-  onSeek, onSkipForward, onSkipBackward, onSetSpeed,
-  onArchive, onCapture, onClose, skipSeconds, sourceFolderId, sourceFolder,
+  playerState, actions, onArchive, onCapture, onClose, sourceFolderId,
 }: Props): React.JSX.Element | null {
-  const { currentFile, isPlaying, position, duration, speed, buffering } = playerState;
+  const { currentFile, sourceFolder, isPlaying, position, duration, speed, skipSeconds, buffering, error } = playerState;
   const [summary, setSummary] = useState<string | null>(null);
-  const [captured, setCaptured] = useState(false);
+  const [captureStatus, setCaptureStatus] = useState<CaptureStatus>('idle');
+  // Position affichée pendant que l'utilisateur fait glisser la barre : les
+  // timeupdate ne reprennent la main qu'au relâchement (pas de curseur qui saute)
+  const [scrubPosition, setScrubPosition] = useState<number | null>(null);
 
   const currentFileName = currentFile?.name ?? null;
   useEffect(() => {
     setSummary(null);
     if (!currentFileName || !sourceFolderId) return;
+    let cancelled = false;
     void fetchMarkdownContent(sourceFolderId, currentFileName).then((md) => {
-      setSummary(md ? extractSummary(md) : null);
+      if (!cancelled) setSummary(md ? extractSummary(md) : null);
     });
+    return () => { cancelled = true; };
   }, [currentFileName, sourceFolderId]);
 
-  const handleSeek = useCallback((e: React.ChangeEvent<HTMLInputElement>): void => {
-    onSeek(parseFloat(e.target.value));
-  }, [onSeek]);
+  useEffect(() => {
+    if (captureStatus !== 'done' && captureStatus !== 'failed') return;
+    const timer = setTimeout(() => setCaptureStatus('idle'), 2000);
+    return () => clearTimeout(timer);
+  }, [captureStatus]);
 
-  const handleCapture = useCallback((): void => {
-    onCapture();
-    setCaptured(true);
-    setTimeout(() => setCaptured(false), 2000);
-  }, [onCapture]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const handleCapture = useCallback(async (): Promise<void> => {
+    if (captureStatus === 'saving') return;
+    setCaptureStatus('saving');
+    const ok = await onCapture();
+    setCaptureStatus(ok ? 'done' : 'failed');
+  }, [onCapture, captureStatus]);
+
+  const commitScrub = useCallback((): void => {
+    if (scrubPosition === null) return;
+    actions.seekTo(scrubPosition);
+    setScrubPosition(null);
+  }, [scrubPosition, actions]);
 
   if (!currentFile) return null;
 
-  const title = currentFile.name.replace(/\.mp3$/i, '');
-  const remaining = Math.max(0, duration - position);
+  const shownPosition = scrubPosition ?? position;
+  const remaining = Math.max(0, duration - shownPosition);
+  const captureColor = captureStatus === 'done' ? 'var(--success)'
+    : captureStatus === 'failed' ? 'var(--danger)'
+      : captureStatus === 'saving' ? 'var(--accent)' : 'var(--text-3)';
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex flex-col select-none lg:inset-y-0 lg:left-1/2 lg:right-auto lg:w-[640px] lg:-translate-x-1/2"
-      style={{
-        background: 'var(--bg)',
-        paddingTop: 'env(safe-area-inset-top)',
-        paddingBottom: 'env(safe-area-inset-bottom)',
-      }}
-    >
+    <FullscreenPanel className="select-none">
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 8px 4px 12px', minHeight: 52 }}>
-        <button onClick={onClose} style={BTN}>
+        <IconButton label="Réduire le lecteur" onClick={onClose}>
           <ChevronDownIcon size={22} />
-        </button>
+        </IconButton>
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 500, letterSpacing: '0.1em', color: 'var(--text-3)', textTransform: 'uppercase' }}>
-          En lecture
+          {buffering ? 'Chargement' : 'En lecture'}
         </span>
         <div style={{ display: 'flex' }}>
-          <button onClick={handleCapture} style={{ ...BTN, color: captured ? 'var(--accent)' : 'var(--text-3)' }}>
-            <BookmarkIcon size={20} />
-          </button>
-          <button onClick={onArchive} style={BTN}>
+          <IconButton
+            label={captureStatus === 'done' ? 'Passage capturé' : 'Capturer ce passage'}
+            onClick={() => void handleCapture()}
+            disabled={captureStatus === 'saving'}
+            style={{ color: captureColor }}
+          >
+            {captureStatus === 'done' ? <CheckIcon size={20} /> : <BookmarkIcon size={20} />}
+          </IconButton>
+          <IconButton label="Archiver et passer au suivant" onClick={onArchive}>
             <ArchiveIcon size={20} />
-          </button>
+          </IconButton>
         </div>
       </div>
 
-      {/* Spine + title */}
+      {/* Cote + titre */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '0 32px', gap: 20, minHeight: 0 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: 52, fontWeight: 500, lineHeight: 1, color: 'var(--accent)', letterSpacing: '-0.02em' }}>
@@ -120,7 +118,7 @@ export function PlayerFull({
             display: '-webkit-box', WebkitLineClamp: 2,
             WebkitBoxOrient: 'vertical' as const, overflow: 'hidden', margin: 0,
           }}>
-            {title}
+            {stripMp3(currentFile.name)}
           </h2>
           {summary && (
             <p style={{
@@ -133,25 +131,37 @@ export function PlayerFull({
               {summary}
             </p>
           )}
+          {error && (
+            <p role="alert" style={{ fontFamily: 'var(--font-sans)', fontSize: 12, color: 'var(--danger)', margin: '10px 0 0' }}>
+              {error}
+            </p>
+          )}
         </div>
       </div>
 
-      {/* Seek + controls + speed */}
+      {/* Seek + contrôles + vitesse */}
       <div style={{ padding: '0 24px 20px' }}>
-        {/* Seek bar */}
         <div style={{ marginBottom: 20 }}>
           <input
             type="range"
+            aria-label="Position de lecture"
             min={0}
             max={duration || 1}
             step={1}
-            value={position}
-            onChange={handleSeek}
+            value={shownPosition}
+            onPointerDown={() => setScrubPosition(position)}
+            onChange={(e) => {
+              const value = parseFloat(e.target.value);
+              if (scrubPosition !== null) setScrubPosition(value);
+              else actions.seekTo(value);
+            }}
+            onPointerUp={commitScrub}
+            onPointerCancel={commitScrub}
             style={{ width: '100%', accentColor: 'var(--accent)', cursor: 'pointer', height: 3 }}
           />
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6 }}>
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-3)', fontVariantNumeric: 'tabular-nums' }}>
-              {formatTime(position)}
+              {formatTime(shownPosition)}
             </span>
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-3)', fontVariantNumeric: 'tabular-nums' }}>
               -{formatTime(remaining)}
@@ -159,28 +169,25 @@ export function PlayerFull({
           </div>
         </div>
 
-        {/* Controls */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-          <button onClick={() => void onPrevious()} style={BTN}>
+          <IconButton label="Piste précédente" onClick={() => void actions.playPrevious()}>
             <SkipBackIcon size={24} />
-          </button>
+          </IconButton>
+
+          <SkipButton label={`Reculer de ${skipSeconds} secondes`} seconds={skipSeconds} onClick={actions.skipBackward}>
+            <SkipBackIcon size={20} />
+          </SkipButton>
 
           <button
-            onClick={() => onSkipBackward(skipSeconds)}
-            style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, background: 'none', border: 'none', cursor: 'pointer' }}
-          >
-            <SkipBackIcon size={20} style={{ color: 'var(--text-3)' }} />
-            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)', fontVariantNumeric: 'tabular-nums' }}>{skipSeconds}s</span>
-          </button>
-
-          <button
-            onClick={onPlayPause}
-            disabled={buffering}
+            type="button"
+            aria-label={isPlaying ? 'Pause' : 'Lecture'}
+            onClick={actions.togglePlay}
             style={{
               width: 64, height: 64, borderRadius: 32,
               background: 'var(--accent)', color: 'var(--accent-text)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               border: 'none', cursor: 'pointer', flexShrink: 0,
+              opacity: buffering ? 0.7 : 1, transition: 'opacity 140ms',
             }}
           >
             {isPlaying
@@ -189,25 +196,22 @@ export function PlayerFull({
             }
           </button>
 
-          <button
-            onClick={() => onSkipForward(skipSeconds)}
-            style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, background: 'none', border: 'none', cursor: 'pointer' }}
-          >
-            <SkipForwardIcon size={20} style={{ color: 'var(--text-3)' }} />
-            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)', fontVariantNumeric: 'tabular-nums' }}>{skipSeconds}s</span>
-          </button>
+          <SkipButton label={`Avancer de ${skipSeconds} secondes`} seconds={skipSeconds} onClick={actions.skipForward}>
+            <SkipForwardIcon size={20} />
+          </SkipButton>
 
-          <button onClick={() => void onNext()} style={BTN}>
+          <IconButton label="Piste suivante" onClick={() => void actions.playNext()}>
             <SkipForwardIcon size={24} />
-          </button>
+          </IconButton>
         </div>
 
-        {/* Speed pills */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-          {SPEEDS.map((s) => (
+        <div role="group" aria-label="Vitesse de lecture" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+          {PLAYBACK_SPEEDS.map((s) => (
             <button
+              type="button"
               key={s}
-              onClick={() => onSetSpeed(s)}
+              aria-pressed={speed === s}
+              onClick={() => actions.setSpeed(s)}
               style={{
                 height: 28, padding: '0 10px', borderRadius: 'var(--r-pill)',
                 background: speed === s ? 'var(--accent)' : 'var(--surface-2)',
@@ -221,6 +225,22 @@ export function PlayerFull({
           ))}
         </div>
       </div>
-    </div>
+    </FullscreenPanel>
+  );
+}
+
+function SkipButton({ label, seconds, onClick, children }: {
+  label: string; seconds: number; onClick: () => void; children: React.ReactNode;
+}): React.JSX.Element {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      onClick={onClick}
+      style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 8 }}
+    >
+      {children}
+      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontVariantNumeric: 'tabular-nums' }}>{seconds}s</span>
+    </button>
   );
 }

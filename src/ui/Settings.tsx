@@ -1,17 +1,18 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { XIcon, LogOutIcon, RefreshIcon, BookmarkIcon } from './icons';
 import { getSettings, saveSettings } from '../state/db';
 import { signOut } from '../auth/auth';
 import { clearAudioCache, getCacheStats } from '../offline/cache';
 import { initStateSync } from '../state/driveState';
-import type { AppSettings } from '../drive/types';
-import { DEFAULT_SETTINGS } from '../drive/types';
+import { formatBytes, plural } from '../lib/format';
+import { FullscreenPanel, PanelHeader, CenteredSpinner } from './primitives';
+import { PLAYBACK_SPEEDS, SKIP_OPTIONS, AUTO_REWIND_OPTIONS, type AppSettings } from '../drive/types';
 
 interface Props {
   onClose: () => void;
   audioFolderId: string | null;
   onResync: () => void;
-  onSettingsChange?: (key: string, value: number | boolean) => void;
+  onSettingsChange?: (patch: Partial<AppSettings>) => void;
   onShowCaptures?: () => void;
 }
 
@@ -27,18 +28,30 @@ function SectionLabel({ children }: { children: React.ReactNode }): React.JSX.El
   );
 }
 
+function FieldLabel({ children }: { children: React.ReactNode }): React.JSX.Element {
+  return (
+    <p style={{ fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--text-3)', marginBottom: 10 }}>
+      {children}
+    </p>
+  );
+}
+
 function PillGroup<T extends number | string>({
-  options, value, onChange, fmt,
+  options, value, onChange, fmt, label,
 }: {
   options: readonly T[];
   value: T;
   onChange: (v: T) => void;
   fmt?: (v: T) => string;
+  label: string;
 }): React.JSX.Element {
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+    <div role="radiogroup" aria-label={label} style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
       {options.map((o) => (
         <button
+          type="button"
+          role="radio"
+          aria-checked={value === o}
           key={String(o)}
           onClick={() => onChange(o)}
           style={{
@@ -56,9 +69,13 @@ function PillGroup<T extends number | string>({
   );
 }
 
-function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }): React.JSX.Element {
+function Toggle({ value, onChange, label }: { value: boolean; onChange: (v: boolean) => void; label: string }): React.JSX.Element {
   return (
     <button
+      type="button"
+      role="switch"
+      aria-checked={value}
+      aria-label={label}
       onClick={() => onChange(!value)}
       style={{
         width: 44, height: 24, borderRadius: 12, flexShrink: 0,
@@ -90,23 +107,50 @@ function Row({ label, sub, right }: { label: string; sub?: string; right: React.
   );
 }
 
+function TextButton({ onClick, disabled, icon, children, danger = false, busy = false }: {
+  onClick: () => void; disabled?: boolean; icon: React.ReactNode; children: React.ReactNode; danger?: boolean; busy?: boolean;
+}): React.JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-busy={busy}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 8, padding: 0,
+        background: 'none', border: 'none', cursor: disabled ? 'default' : 'pointer',
+        color: danger ? 'var(--danger)' : 'var(--text-3)', opacity: disabled ? 0.4 : 1,
+        fontFamily: 'var(--font-sans)', fontSize: 14, fontWeight: danger ? 500 : 400,
+      }}
+    >
+      {icon}
+      <span>{children}</span>
+    </button>
+  );
+}
+
 export function Settings({ onClose, audioFolderId, onResync, onSettingsChange, onShowCaptures }: Props): React.JSX.Element {
-  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
+  const [settings, setSettings] = useState<AppSettings | null>(null);
+  const settingsRef = useRef<AppSettings | null>(null);
   const [cacheStats, setCacheStats] = useState({ count: 0, totalSize: 0 });
   const [clearing, setClearing] = useState(false);
   const [resyncing, setResyncing] = useState(false);
 
   useEffect(() => {
-    void getSettings().then(setSettings);
+    void getSettings().then((s) => { settingsRef.current = s; setSettings(s); });
     void getCacheStats().then(setCacheStats);
   }, []);
 
-  const updateSetting = async <K extends keyof AppSettings>(key: K, value: AppSettings[K]): Promise<void> => {
-    const updated = { ...settings, [key]: value };
-    setSettings(updated);
-    await saveSettings(updated);
-    onSettingsChange?.(key as string, value as number | boolean);
-  };
+  // Patch atomique : deux modifications rapprochées (saut avant + arrière)
+  // partent du dernier état connu, pas d'une closure périmée
+  const update = useCallback((patch: Partial<AppSettings>): void => {
+    if (!settingsRef.current) return;
+    const next = { ...settingsRef.current, ...patch };
+    settingsRef.current = next;
+    setSettings(next);
+    void saveSettings(next);
+    onSettingsChange?.(patch);
+  }, [onSettingsChange]);
 
   const handleClearCache = async (): Promise<void> => {
     setClearing(true);
@@ -129,145 +173,114 @@ export function Settings({ onClose, audioFolderId, onResync, onSettingsChange, o
     }
   };
 
-  const formatBytes = (bytes: number): string => {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  };
-
   return (
-    <div
-      className="fixed inset-0 z-50 overflow-y-auto lg:inset-y-0 lg:left-1/2 lg:right-auto lg:w-[640px] lg:-translate-x-1/2"
-      style={{ background: 'var(--bg)', paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}
-    >
-      {/* Header */}
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '8px 8px 8px 20px', minHeight: 52,
-        borderBottom: '1px solid var(--border-1)',
-        background: 'var(--surface-1)',
-      }}>
-        <h2 style={{ fontFamily: 'var(--font-sans)', fontSize: 18, fontWeight: 600, color: 'var(--text-1)', letterSpacing: '-0.01em' }}>
-          Réglages
-        </h2>
-        <button
-          onClick={onClose}
-          style={{ width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', borderRadius: 10 }}
-        >
-          <XIcon size={20} />
-        </button>
-      </div>
+    <FullscreenPanel className="overflow-y-auto">
+      <PanelHeader title="Réglages" onClose={onClose} closeIcon={<XIcon size={20} />} />
 
-      <div style={{ padding: '24px 20px', display: 'flex', flexDirection: 'column', gap: 32 }}>
+      {settings === null ? (
+        <CenteredSpinner />
+      ) : (
+        <div style={{ padding: '24px 20px', display: 'flex', flexDirection: 'column', gap: 32 }}>
 
-        {/* Lecture */}
-        <section>
-          <SectionLabel>Lecture</SectionLabel>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            <div>
-              <p style={{ fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--text-3)', marginBottom: 10 }}>Vitesse par défaut</p>
-              <PillGroup
-                options={[0.75, 1, 1.25, 1.5, 1.75, 2] as const}
-                value={settings.defaultSpeed}
-                onChange={(v) => void updateSetting('defaultSpeed', v)}
-                fmt={(v) => `${v}x`}
-              />
-            </div>
-            <div>
-              <p style={{ fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--text-3)', marginBottom: 10 }}>Saut (avant / arrière)</p>
-              <PillGroup
-                options={[15, 30] as const}
-                value={settings.skipForwardSeconds}
-                onChange={(v) => { void updateSetting('skipForwardSeconds', v); void updateSetting('skipBackwardSeconds', v); }}
-                fmt={(v) => `${v}s`}
-              />
-            </div>
-            <div>
-              <p style={{ fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--text-3)', marginBottom: 10 }}>
-                Recul à la reprise{' '}
-                <span style={{ color: 'var(--text-4)' }}>après pause &gt; 30 s</span>
-              </p>
-              <PillGroup
-                options={[0, 5, 10, 15, 20] as const}
-                value={settings.autoRewindSeconds}
-                onChange={(v) => void updateSetting('autoRewindSeconds', v)}
-                fmt={(v) => v === 0 ? 'Off' : `${v}s`}
-              />
-            </div>
-          </div>
-        </section>
-
-        {/* Audio */}
-        <section>
-          <SectionLabel>Audio</SectionLabel>
-          <Row
-            label="Boost voix"
-            sub="Compresseur — meilleure intelligibilité dans le bruit"
-            right={<Toggle value={settings.voiceBoost} onChange={(v) => void updateSetting('voiceBoost', v)} />}
-          />
-        </section>
-
-        {/* Hors-ligne */}
-        <section>
-          <SectionLabel>Hors-ligne</SectionLabel>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <Row
-              label="Téléchargement auto"
-              sub="5 fichiers les plus anciens"
-              right={<Toggle value={settings.autoDownload} onChange={(v) => void updateSetting('autoDownload', v)} />}
-            />
-            <div style={{ background: 'var(--surface-1)', border: '1px solid var(--border-1)', borderRadius: 'var(--r-lg)', padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <p style={{ fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--text-3)' }}>
-                Cache : {cacheStats.count} fichier{cacheStats.count > 1 ? 's' : ''} ({formatBytes(cacheStats.totalSize)})
-              </p>
-              <button
-                onClick={() => void handleClearCache()}
-                disabled={clearing || cacheStats.count === 0}
-                style={{ fontFamily: 'var(--font-sans)', fontSize: 13, fontWeight: 500, color: 'var(--danger)', background: 'none', border: 'none', cursor: 'pointer', opacity: (clearing || cacheStats.count === 0) ? 0.4 : 1 }}
-              >
-                {clearing ? 'Suppression…' : 'Vider'}
-              </button>
-            </div>
-          </div>
-        </section>
-
-        {/* Sync */}
-        <section>
-          <SectionLabel>Synchronisation</SectionLabel>
-          <button
-            onClick={() => void handleResync()}
-            disabled={resyncing || !audioFolderId}
-            style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', opacity: (resyncing || !audioFolderId) ? 0.4 : 1 }}
-          >
-            <RefreshIcon size={16} className={resyncing ? 'animate-spin' : ''} />
-            <span style={{ fontFamily: 'var(--font-sans)', fontSize: 14 }}>{resyncing ? 'Synchronisation…' : 'Resynchroniser depuis Drive'}</span>
-          </button>
-        </section>
-
-        {/* Captures */}
-        {onShowCaptures && (
           <section>
-            <button
-              onClick={onShowCaptures}
-              style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)' }}
-            >
-              <BookmarkIcon size={16} />
-              <span style={{ fontFamily: 'var(--font-sans)', fontSize: 14 }}>Passages capturés</span>
-            </button>
+            <SectionLabel>Lecture</SectionLabel>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+              <div>
+                <FieldLabel>Vitesse par défaut</FieldLabel>
+                <PillGroup
+                  label="Vitesse par défaut"
+                  options={PLAYBACK_SPEEDS}
+                  value={settings.defaultSpeed}
+                  onChange={(v) => update({ defaultSpeed: v })}
+                  fmt={(v) => `${v}x`}
+                />
+              </div>
+              <div>
+                <FieldLabel>Saut (avant / arrière)</FieldLabel>
+                <PillGroup
+                  label="Durée des sauts"
+                  options={SKIP_OPTIONS}
+                  value={settings.skipForwardSeconds}
+                  onChange={(v) => update({ skipForwardSeconds: v, skipBackwardSeconds: v })}
+                  fmt={(v) => `${v}s`}
+                />
+              </div>
+              <div>
+                <FieldLabel>
+                  Recul à la reprise{' '}
+                  <span style={{ color: 'var(--text-4)' }}>après pause &gt; 30 s</span>
+                </FieldLabel>
+                <PillGroup
+                  label="Recul à la reprise"
+                  options={AUTO_REWIND_OPTIONS}
+                  value={settings.autoRewindSeconds}
+                  onChange={(v) => update({ autoRewindSeconds: v })}
+                  fmt={(v) => v === 0 ? 'Off' : `${v}s`}
+                />
+              </div>
+            </div>
           </section>
-        )}
 
-        {/* Déconnexion */}
-        <section style={{ paddingTop: 8, borderTop: '1px solid var(--border-1)' }}>
-          <button
-            onClick={() => void signOut()}
-            style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)' }}
-          >
-            <LogOutIcon size={16} />
-            <span style={{ fontFamily: 'var(--font-sans)', fontSize: 14, fontWeight: 500 }}>Se déconnecter</span>
-          </button>
-        </section>
-      </div>
-    </div>
+          <section>
+            <SectionLabel>Audio</SectionLabel>
+            <Row
+              label="Boost voix"
+              sub="Compresseur : meilleure intelligibilité dans le bruit"
+              right={<Toggle label="Boost voix" value={settings.voiceBoost} onChange={(v) => update({ voiceBoost: v })} />}
+            />
+          </section>
+
+          <section>
+            <SectionLabel>Hors-ligne</SectionLabel>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <Row
+                label="Téléchargement auto"
+                sub={`${settings.autoDownloadCount} fichiers les plus anciens par dossier`}
+                right={<Toggle label="Téléchargement automatique" value={settings.autoDownload} onChange={(v) => update({ autoDownload: v })} />}
+              />
+              <div style={{ background: 'var(--surface-1)', border: '1px solid var(--border-1)', borderRadius: 'var(--r-lg)', padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <p style={{ fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--text-3)' }}>
+                  Cache : {cacheStats.count} {plural(cacheStats.count, 'fichier')} ({formatBytes(cacheStats.totalSize)})
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void handleClearCache()}
+                  disabled={clearing || cacheStats.count === 0}
+                  style={{ fontFamily: 'var(--font-sans)', fontSize: 13, fontWeight: 500, color: 'var(--danger)', background: 'none', border: 'none', cursor: 'pointer', opacity: (clearing || cacheStats.count === 0) ? 0.4 : 1 }}
+                >
+                  {clearing ? 'Suppression…' : 'Vider'}
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <section>
+            <SectionLabel>Synchronisation</SectionLabel>
+            <TextButton
+              onClick={() => void handleResync()}
+              disabled={resyncing || !audioFolderId}
+              busy={resyncing}
+              icon={<RefreshIcon size={16} className={resyncing ? 'animate-spin' : ''} />}
+            >
+              {resyncing ? 'Synchronisation…' : 'Resynchroniser depuis Drive'}
+            </TextButton>
+          </section>
+
+          {onShowCaptures && (
+            <section>
+              <TextButton onClick={onShowCaptures} icon={<BookmarkIcon size={16} />}>
+                Passages capturés
+              </TextButton>
+            </section>
+          )}
+
+          <section style={{ paddingTop: 8, borderTop: '1px solid var(--border-1)' }}>
+            <TextButton onClick={() => void signOut()} icon={<LogOutIcon size={16} />} danger>
+              Se déconnecter
+            </TextButton>
+          </section>
+        </div>
+      )}
+    </FullscreenPanel>
   );
 }

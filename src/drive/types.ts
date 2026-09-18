@@ -15,9 +15,16 @@ export interface DriveFolder {
   parents: string[];
 }
 
-export interface TokenSet {
+// Un onglet de l'app : un dossier de Audio/ et ses MP3
+export interface Source {
+  folder: DriveFolder;
+  files: DriveFile[];
+}
+
+// Credentials OAuth persistés en IndexedDB (refresh token chiffré AES-GCM)
+export interface StoredTokens {
   accessToken: string;
-  refreshToken: string;
+  encryptedRefreshToken: string | null;
   expiresAt: number;
 }
 
@@ -30,12 +37,6 @@ export interface PlaybackState {
   fileName: string;
 }
 
-export interface DriveStateFile {
-  version: number;
-  files: Record<string, PlaybackState>;
-  lastUpdated: number;
-}
-
 export interface OfflineAction {
   id: string;
   type: 'archive';
@@ -46,8 +47,26 @@ export interface OfflineAction {
   audioFolderId: string;
   createdAt: number;
   // Dossier hebdo de destination (ex "2026-S28") ; absent sur les actions
-  // enregistrées avant cette version → semaine courante au moment du flush
+  // enregistrées avant cette version : semaine courante au moment du flush
   destWeekKey?: string;
+}
+
+// Métadonnées d'un MP3 téléchargé pour l'écoute hors-ligne
+export interface CachedFileMeta {
+  fileId: string;
+  name: string;
+  sourceFolder: string;
+  sourceFolderId: string;
+  size: number;
+  cachedAt: number;
+  createdTime?: string;
+}
+
+export interface ListeningDay {
+  date: string;
+  totalMinutes: number;
+  bySource: Record<string, number>;
+  filesCompleted: number;
 }
 
 export interface AppSettings {
@@ -69,3 +88,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoRewindSeconds: 5,
   voiceBoost: false,
 };
+
+export const PLAYBACK_SPEEDS = [0.75, 1, 1.25, 1.5, 1.75, 2] as const;
+export const SKIP_OPTIONS = [15, 30] as const;
+export const AUTO_REWIND_OPTIONS = [0, 5, 10, 15, 20] as const;

@@ -1,17 +1,16 @@
-import type { Source } from '../hooks/useApp';
+import { memo } from 'react';
+import type { Source } from '../drive/types';
+
+export type View = 'source' | 'queue' | 'stats' | 'archive';
 
 interface Props {
   sources: Source[];
   activeIndex: number;
-  onSelect: (index: number) => void;
+  view: View;
+  onSelectSource: (index: number) => void;
+  onSelectView: (view: Exclude<View, 'source'>) => void;
   queueCount?: number;
-  queueActive?: boolean;
-  onQueueSelect?: () => void;
-  statsActive?: boolean;
-  onStatsSelect?: () => void;
-  archiveActive?: boolean;
-  onArchiveSelect?: () => void;
-  activeRestTime?: string;
+  activeRestTime?: string | null;
 }
 
 function Tab({
@@ -19,12 +18,15 @@ function Tab({
 }: {
   label: string;
   count?: number | string;
-  subLabel?: string;
+  subLabel?: string | null;
   active: boolean;
   onClick?: () => void;
 }): React.JSX.Element {
   return (
     <button
+      type="button"
+      role="tab"
+      aria-selected={active}
       onClick={onClick}
       style={{
         padding: '12px 4px 14px',
@@ -70,15 +72,13 @@ function Tab({
   );
 }
 
-export function SourceTabs({
-  sources, activeIndex, onSelect,
-  queueCount = 0, queueActive = false, onQueueSelect,
-  statsActive = false, onStatsSelect,
-  archiveActive = false, onArchiveSelect,
-  activeRestTime,
+export const SourceTabs = memo(function SourceTabs({
+  sources, activeIndex, view, onSelectSource, onSelectView, queueCount = 0, activeRestTime,
 }: Props): React.JSX.Element {
   return (
     <div
+      role="tablist"
+      className="scrollbar-none"
       style={{
         display: 'flex', gap: 24, padding: '0 16px',
         borderBottom: '1px solid var(--border-1)',
@@ -96,7 +96,7 @@ export function SourceTabs({
         </div>
       ) : (
         sources.map((src, i) => {
-          const active = !queueActive && !statsActive && !archiveActive && i === activeIndex;
+          const active = view === 'source' && i === activeIndex;
           return (
             <Tab
               key={src.folder.id}
@@ -104,32 +104,17 @@ export function SourceTabs({
               count={src.files.length}
               subLabel={active ? activeRestTime : undefined}
               active={active}
-              onClick={() => onSelect(i)}
+              onClick={() => onSelectSource(i)}
             />
           );
         })
       )}
 
       {queueCount > 0 && (
-        <Tab
-          label="File"
-          count={queueCount}
-          active={queueActive}
-          onClick={onQueueSelect}
-        />
+        <Tab label="File" count={queueCount} active={view === 'queue'} onClick={() => onSelectView('queue')} />
       )}
-
-      <Tab
-        label="Stats"
-        active={statsActive}
-        onClick={onStatsSelect}
-      />
-
-      <Tab
-        label="Archive"
-        active={archiveActive}
-        onClick={onArchiveSelect}
-      />
+      <Tab label="Stats" active={view === 'stats'} onClick={() => onSelectView('stats')} />
+      <Tab label="Archive" active={view === 'archive'} onClick={() => onSelectView('archive')} />
     </div>
   );
-}
+});

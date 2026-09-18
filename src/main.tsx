@@ -4,15 +4,40 @@ import { registerSW } from 'virtual:pwa-register';
 import './index.css';
 import App from './App';
 import { getAccessToken, invalidateAccessToken } from './auth/auth';
+import { player } from './player/player';
 
-// Auto-reload the page when a new service worker version is activated.
-// Without this, the old JS bundle stays in memory even after a new SW installs.
-registerSW({
+// Délai avant d'appliquer une mise à jour après une pause : le temps qu'un
+// enchaînement automatique (fin de piste puis suivante) démarre, s'il y en a un
+const UPDATE_AFTER_PAUSE_MS = 1_500;
+
+// Mise à jour de l'app sans jamais couper une écoute : le nouveau Service
+// Worker attend (mode "prompt"), on l'active dès que rien ne joue. La page se
+// recharge alors toute seule (événement "controlling" de workbox-window).
+const updateSW = registerSW({
   onNeedRefresh() {
-    window.location.reload();
-  },
-  onOfflineReady() {
-    // app is ready for offline use
+    let done = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const apply = (): void => {
+      if (done || player.isPlaying()) return;
+      done = true;
+      off();
+      document.removeEventListener('visibilitychange', onVisibility);
+      void updateSW(true);
+    };
+    const scheduleApply = (): void => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(apply, UPDATE_AFTER_PAUSE_MS);
+    };
+    const onVisibility = (): void => {
+      if (document.visibilityState === 'hidden') scheduleApply();
+    };
+    const off = player.on((event) => {
+      if (event.type === 'pause' || event.type === 'ended') scheduleApply();
+    });
+    document.addEventListener('visibilitychange', onVisibility);
+
+    apply();
   },
 });
 

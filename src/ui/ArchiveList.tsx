@@ -1,7 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
-import { findFolder, findOrCreateFolder, listSubfolders, listChildren, moveFile } from '../drive/api';
+import { findFolder, findOrCreateFolder, listSubfolders, listChildren, moveFile, AUDIO_MIME } from '../drive/api';
+import { ARCHIVE_FOLDER_NAME } from '../drive/archive';
 import { archiveGroupLabel } from '../state/archiveRules';
+import { formatDate, stripMp3 } from '../lib/format';
 import { PlayIcon, ChevronDownIcon, ChevronUpIcon } from './icons';
+import { CenteredSpinner, EmptyState, ErrorBox, IconButton } from './primitives';
 import type { DriveFile, DriveFolder } from '../drive/types';
 
 interface ArchivedFile {
@@ -17,15 +20,12 @@ interface Props {
   onUnarchived: () => void;
 }
 
-function formatDate(isoString: string): string {
-  return new Date(isoString).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
-}
-
 export function ArchiveList({ audioFolderId, online, onPlay, onUnarchived }: Props): React.JSX.Element {
   const [groups, setGroups] = useState<DriveFolder[] | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [filesByGroup, setFilesByGroup] = useState<Map<string, ArchivedFile[]>>(new Map());
   const [loadingGroup, setLoadingGroup] = useState<string | null>(null);
+  const [unarchiving, setUnarchiving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -33,7 +33,7 @@ export function ArchiveList({ audioFolderId, online, onPlay, onUnarchived }: Pro
     let cancelled = false;
     void (async () => {
       try {
-        const archiveId = await findFolder('Archive', audioFolderId);
+        const archiveId = await findFolder(ARCHIVE_FOLDER_NAME, audioFolderId);
         if (cancelled) return;
         if (!archiveId) { setGroups([]); return; }
         const subfolders = await listSubfolders(archiveId);
@@ -57,18 +57,18 @@ export function ArchiveList({ audioFolderId, online, onPlay, onUnarchived }: Pro
     try {
       const [sources, rootFiles] = await Promise.all([
         listSubfolders(group.id),
-        listChildren(group.id, 'audio/mpeg'),
+        listChildren(group.id, AUDIO_MIME),
       ]);
-      const entries: ArchivedFile[] = rootFiles.map((f) => ({
-        file: f, sourceName: '', sourceFolderId: group.id,
-      }));
-      for (const source of sources) {
-        const files = await listChildren(source.id, 'audio/mpeg');
-        entries.push(...files.map((f) => ({
-          file: f, sourceName: source.name, sourceFolderId: source.id,
-        })));
-      }
-      entries.sort((a, b) => a.file.createdTime.localeCompare(b.file.createdTime));
+      const perSource = await Promise.all(
+        sources.map(async (source) => {
+          const files = await listChildren(source.id, AUDIO_MIME);
+          return files.map((f): ArchivedFile => ({ file: f, sourceName: source.name, sourceFolderId: source.id }));
+        }),
+      );
+      const entries: ArchivedFile[] = [
+        ...rootFiles.map((f): ArchivedFile => ({ file: f, sourceName: '', sourceFolderId: group.id })),
+        ...perSource.flat(),
+      ].sort((a, b) => a.file.createdTime.localeCompare(b.file.createdTime));
       setFilesByGroup((m) => new Map(m).set(group.id, entries));
     } catch {
       setError('Erreur de chargement du groupe.');
@@ -78,11 +78,11 @@ export function ArchiveList({ audioFolderId, online, onPlay, onUnarchived }: Pro
   }, [expanded, filesByGroup]);
 
   const handleUnarchive = useCallback(async (group: DriveFolder, entry: ArchivedFile): Promise<void> => {
+    setUnarchiving(entry.file.id);
     try {
-      const destName = entry.sourceName || 'Audio';
-      const destId = destName === 'Audio'
-        ? audioFolderId
-        : await findOrCreateFolder(destName, audioFolderId);
+      const destId = entry.sourceName
+        ? await findOrCreateFolder(entry.sourceName, audioFolderId)
+        : audioFolderId;
       await moveFile(entry.file.id, entry.sourceFolderId, destId);
       setFilesByGroup((m) => {
         const next = new Map(m);
@@ -92,30 +92,20 @@ export function ArchiveList({ audioFolderId, online, onPlay, onUnarchived }: Pro
       onUnarchived();
     } catch (err) {
       console.error('Unarchive failed', err);
-      setError(`Désarchivage impossible pour ${entry.file.name}`);
+      setError(`Désarchivage impossible pour ${stripMp3(entry.file.name)}`);
+    } finally {
+      setUnarchiving(null);
     }
   }, [audioFolderId, onUnarchived]);
 
-  if (groups === null) {
-    return (
-      <div className="flex items-center justify-center py-16">
-        <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
-  }
+  if (groups === null) return <CenteredSpinner />;
 
   return (
     <div className="pb-4">
-      {error && (
-        <div className="mx-4 mt-4 p-3 bg-red-500/20 border border-red-500/40 rounded-xl text-red-300 text-sm">
-          {error}
-        </div>
-      )}
+      {error && <ErrorBox>{error}</ErrorBox>}
 
       {groups.length === 0 && !error && (
-        <div className="flex flex-col items-center justify-center py-16" style={{ color: 'var(--text-3)' }}>
-          <p style={{ fontSize: 14 }}>Aucun audio archivé pour le moment</p>
-        </div>
+        <EmptyState title="Aucun audio archivé pour le moment" />
       )}
 
       {groups.map((group) => {
@@ -124,6 +114,8 @@ export function ArchiveList({ audioFolderId, online, onPlay, onUnarchived }: Pro
         return (
           <div key={group.id} className="border-b border-border-1">
             <button
+              type="button"
+              aria-expanded={isOpen}
               onClick={() => void toggleGroup(group)}
               className="w-full flex items-center justify-between px-4 hover:bg-surface-2 transition-colors"
               style={{ minHeight: 52, background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}
@@ -141,40 +133,45 @@ export function ArchiveList({ audioFolderId, online, onPlay, onUnarchived }: Pro
 
             {isOpen && (
               loadingGroup === group.id ? (
-                <div className="flex justify-center py-6">
-                  <div className="w-5 h-5 border-2 border-accent border-t-transparent rounded-full animate-spin" />
-                </div>
+                <CenteredSpinner size={20} padding={24} />
+              ) : (entries ?? []).length === 0 ? (
+                <EmptyState title="Groupe vide" padding={16} />
               ) : (
-                (entries ?? []).map((entry, i, all) => (
-                  <div key={entry.file.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-surface-2 transition-colors">
-                    <button
-                      onClick={() => onPlay(entry.file, all.map((e) => e.file), i)}
-                      className="w-9 h-9 flex items-center justify-center rounded-full flex-shrink-0"
-                      style={{ background: 'var(--surface-3)', color: 'var(--text-1)', border: 'none', cursor: 'pointer' }}
-                      title="Écouter"
-                    >
-                      <PlayIcon size={14} />
-                    </button>
-                    <div className="flex-1 min-w-0">
-                      <p className="truncate" style={{ fontFamily: 'var(--font-sans)', fontSize: 14, fontWeight: 500, color: 'var(--text-1)', margin: 0 }}>
-                        {entry.file.name.replace(/\.mp3$/i, '')}
-                      </p>
-                      <p style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-3)', margin: 0 }}>
-                        {entry.sourceName ? `${entry.sourceName} · ` : ''}{formatDate(entry.file.createdTime)}
-                      </p>
+                (entries ?? []).map((entry, i, all) => {
+                  const busy = unarchiving === entry.file.id;
+                  return (
+                    <div key={entry.file.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-surface-2 transition-colors" style={{ opacity: busy ? 0.5 : 1 }}>
+                      <IconButton
+                        label="Écouter"
+                        size={36}
+                        onClick={() => onPlay(entry.file, all.map((e) => e.file), i)}
+                        style={{ borderRadius: 18, background: 'var(--surface-3)', color: 'var(--text-1)' }}
+                      >
+                        <PlayIcon size={14} />
+                      </IconButton>
+                      <div className="flex-1 min-w-0">
+                        <p className="truncate" style={{ fontFamily: 'var(--font-sans)', fontSize: 14, fontWeight: 500, color: 'var(--text-1)', margin: 0 }}>
+                          {stripMp3(entry.file.name)}
+                        </p>
+                        <p style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-3)', margin: 0 }}>
+                          {entry.sourceName ? `${entry.sourceName} · ` : ''}{formatDate(entry.file.createdTime)}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void handleUnarchive(group, entry)}
+                        style={{
+                          fontFamily: 'var(--font-sans)', fontSize: 12, color: 'var(--text-3)',
+                          background: 'none', border: 'none', cursor: busy ? 'default' : 'pointer', flexShrink: 0, padding: '6px 4px',
+                        }}
+                        title="Remettre dans son dossier d'origine"
+                      >
+                        {busy ? 'Déplacement…' : 'Désarchiver'}
+                      </button>
                     </div>
-                    <button
-                      onClick={() => void handleUnarchive(group, entry)}
-                      style={{
-                        fontFamily: 'var(--font-sans)', fontSize: 12, color: 'var(--text-3)',
-                        background: 'none', border: 'none', cursor: 'pointer', flexShrink: 0, padding: '6px 4px',
-                      }}
-                      title="Remettre dans son dossier d'origine"
-                    >
-                      Désarchiver
-                    </button>
-                  </div>
-                ))
+                  );
+                })
               )
             )}
           </div>

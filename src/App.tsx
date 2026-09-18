@@ -1,7 +1,7 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { AuthScreen } from './ui/AuthButton';
-import { SourceTabs } from './ui/SourceTabs';
-import { FileList } from './ui/FileList';
+import { SourceTabs, type View } from './ui/SourceTabs';
+import { FileList, type LivePlayback } from './ui/FileList';
 import { QueueList } from './ui/QueueList';
 import { ArchiveList } from './ui/ArchiveList';
 import { SynthesisPanel } from './ui/SynthesisPanel';
@@ -14,144 +14,166 @@ import { OfflineBanner } from './ui/OfflineBanner';
 import { SettingsIcon, RefreshIcon, SearchIcon, SunIcon, MoonIcon } from './ui/icons';
 import { Wordmark } from './ui/Wordmark';
 import { Dashboard } from './ui/Dashboard';
+import { Spinner, CenteredSpinner, ErrorBox, EmptyState, IconButton } from './ui/primitives';
 import { useTheme } from './hooks/useTheme';
-import { useApp, type Source } from './hooks/useApp';
+import { useApp } from './hooks/useApp';
 import { usePlayer } from './hooks/usePlayer';
 import { useOnline } from './hooks/useOnline';
-import { getLocalPlaybackState } from './state/driveState';
-import { getSettings } from './state/db';
-import { fetchMarkdownContent, extractPassage, appendCapture } from './drive/api';
+import { fetchMarkdownContent } from './drive/api';
+import { extractPassage } from './lib/markdown';
+import { appendCapture } from './state/captures';
 import { normalizeFolderName } from './state/archiveRules';
-import type { DriveFile } from './drive/types';
+import { ARCHIVE_FOLDER_NAME } from './drive/archive';
+import type { DriveFile, Source, AppSettings } from './drive/types';
+
+// La ligne active de la liste avance par pas de 5 s : assez fluide pour
+// l'oeil, sans re-rendre la liste à chaque timeupdate (4 fois par seconde)
+const LIST_PROGRESS_STEP_S = 5;
+
+type Overlay = 'none' | 'player' | 'settings' | 'search' | 'captures';
 
 export default function App(): React.JSX.Element {
   const online = useOnline();
   const { theme, toggleTheme } = useTheme();
-  const [playerOpen, setPlayerOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [queueTabActive, setQueueTabActive] = useState(false);
-  const [statsTabActive, setStatsTabActive] = useState(false);
-  const [archiveTabActive, setArchiveTabActive] = useState(false);
+  const [view, setView] = useState<View>('source');
+  const [overlay, setOverlay] = useState<Overlay>('none');
   const [activeRestTime, setActiveRestTime] = useState<string | null>(null);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [capturesOpen, setCapturesOpen] = useState(false);
 
-  // Ref to archiveFile so the player callback can access it without stale closure
-  const archiveFileRef = useRef<
-    (id: string, name: string, source: string, sourceFolderId: string) => Promise<void>
-  >(() => Promise.resolve());
+  const { state: appState, actions: app } = useApp(online);
+  const { sources } = appState;
 
-  const handleArchiveFromPlayer = useCallback(
-    (fileId: string, fileName: string, sourceFolder: string) => {
-      // Un fichier déjà archivé (lecture depuis l'onglet Archive) ne doit pas
-      // être re-déplacé vers la semaine courante à 95 %
-      if (sourceFolder === 'Archive') return;
-      void archiveFileRef.current(fileId, fileName, sourceFolder, '');
-    },
-    [],
+  const findSourceOf = useCallback(
+    (file: DriveFile, folderName?: string): Source | undefined =>
+      sources.find((s) => s.files.some((f) => f.id === file.id))
+      ?? (folderName ? sources.find((s) => s.folder.name === folderName) : undefined),
+    [sources],
   );
 
-  const { state: playerState, ...playerActions } = usePlayer(handleArchiveFromPlayer);
+  // Archivage automatique à 95 % (déclenché par le player)
+  const handleAutoArchive = useCallback((file: DriveFile, sourceFolder: string) => {
+    // Un fichier déjà archivé (lecture depuis l'onglet Archive) ne doit pas
+    // être re-déplacé vers la semaine courante
+    if (sourceFolder === ARCHIVE_FOLDER_NAME) return;
+    const source = findSourceOf(file, sourceFolder);
+    void app.archiveFile(file, source?.folder ?? { id: '', name: sourceFolder });
+  }, [findSourceOf, app]);
 
-  // Auto-deactivate queue tab when queue empties
+  const { state: playerState, actions: player } = usePlayer(handleAutoArchive);
+  const { currentFile } = playerState;
+
+  // L'onglet File disparaît quand la file se vide
   useEffect(() => {
-    if (playerState.customQueue.length === 0) setQueueTabActive(false);
+    if (playerState.customQueue.length === 0) setView((v) => (v === 'queue' ? 'source' : v));
   }, [playerState.customQueue.length]);
 
-  const { state: appState, refresh, archiveFile, archiveMany, setActiveSource, refreshQueueCount } = useApp(online);
+  const closeOverlay = useCallback(() => setOverlay('none'), []);
 
-  // Keep ref in sync
-  useEffect(() => {
-    archiveFileRef.current = (fileId, fileName, sourceFolder, _sourceFolderId) => {
-      const source = appState.sources.find(
-        (s) => s.folder.name === sourceFolder || s.files.some((f) => f.id === fileId),
-      );
-      return archiveFile(fileId, fileName, source?.folder.name ?? sourceFolder, source?.folder.id ?? '');
-    };
-  }, [appState.sources, archiveFile]);
+  // ── Lecture ───────────────────────────────────────────────────────────────
 
-  const handlePlayArchived = useCallback(async (file: DriveFile, queue: DriveFile[], index: number): Promise<void> => {
-    const settings = await getSettings();
-    playerActions.setQueue(queue, 'Archive', index);
-    playerActions.setSpeed(settings.defaultSpeed);
-    playerActions.setSkipSeconds(settings.skipForwardSeconds);
-    const savedState = await getLocalPlaybackState(file.id);
-    await playerActions.loadAndPlay(file, 'Archive', savedState?.position ?? 0);
-  }, [playerActions]);
-
-  const handlePlayFile = useCallback(async (file: DriveFile, index: number): Promise<void> => {
-    const activeSource = appState.sources[appState.activeSourceIndex];
+  const handlePlayFile = useCallback((file: DriveFile, index: number): void => {
+    const activeSource = sources[appState.activeSourceIndex];
     if (!activeSource) return;
+    void player.startPlayback(file, activeSource.folder.name, { files: activeSource.files, index });
+  }, [sources, appState.activeSourceIndex, player]);
 
-    const settings = await getSettings();
-    playerActions.setQueue(activeSource.files, activeSource.folder.name, index);
-    playerActions.setSpeed(settings.defaultSpeed);
-    playerActions.setSkipSeconds(settings.skipForwardSeconds);
+  const handlePlayArchived = useCallback((file: DriveFile, queue: DriveFile[], index: number): void => {
+    void player.startPlayback(file, ARCHIVE_FOLDER_NAME, { files: queue, index });
+  }, [player]);
 
-    const savedState = await getLocalPlaybackState(file.id);
-    await playerActions.loadAndPlay(file, activeSource.folder.name, savedState?.position ?? 0);
-  }, [appState.sources, appState.activeSourceIndex, playerActions]);
+  const handlePlayFromSearch = useCallback((file: DriveFile, source: Source, fileIndex: number): void => {
+    const sourceIndex = sources.indexOf(source);
+    if (sourceIndex >= 0) app.setActiveSource(sourceIndex);
+    setView('source');
+    void player.startPlayback(file, source.folder.name, { files: source.files, index: fileIndex });
+  }, [sources, player, app]);
+
+  // ── Archivage ─────────────────────────────────────────────────────────────
 
   const handleArchive = useCallback(async (file: DriveFile): Promise<void> => {
-    const source = appState.sources.find((s) => s.files.some((f) => f.id === file.id));
+    const source = findSourceOf(file);
     if (!source) return;
-    await archiveFile(file.id, file.name, source.folder.name, source.folder.id);
-    await refreshQueueCount();
-  }, [appState.sources, archiveFile, refreshQueueCount]);
+    await app.archiveFile(file, source.folder);
+  }, [findSourceOf, app]);
 
-  const handleCapture = useCallback(async (): Promise<void> => {
-    const file = playerState.currentFile;
+  // Le fichier suivant démarre tout de suite ; le déplacement Drive se fait
+  // en arrière-plan (la liste est déjà mise à jour de façon optimiste)
+  const handleArchiveCurrentPlaying = useCallback((): void => {
+    if (!currentFile) return;
+    // Déjà dans l'archive (lecture depuis l'onglet Archive) : on passe juste au suivant
+    if (playerState.sourceFolder !== ARCHIVE_FOLDER_NAME) {
+      const source = findSourceOf(currentFile, playerState.sourceFolder);
+      void app.archiveFile(currentFile, source?.folder ?? { id: '', name: playerState.sourceFolder });
+    }
+    void player.playNext();
+    setOverlay('none');
+  }, [currentFile, playerState.sourceFolder, findSourceOf, app, player]);
+
+  // ── Captures ──────────────────────────────────────────────────────────────
+
+  const handleCapture = useCallback(async (): Promise<boolean> => {
     const audioFolderId = appState.audioFolderId;
-    if (!file || !audioFolderId) return;
+    if (!currentFile || !audioFolderId) return false;
 
     const { position, duration } = playerState;
-    const source = appState.sources.find((s) => s.files.some((f) => f.id === file.id));
-    const sourceFolderId = source?.folder.id ?? '';
+    const source = findSourceOf(currentFile);
+    try {
+      const md = source ? await fetchMarkdownContent(source.folder.id, currentFile.name) : null;
+      await appendCapture(audioFolderId, {
+        id: `${currentFile.id}-${Date.now()}`,
+        fileId: currentFile.id,
+        fileName: currentFile.name,
+        sourceFolder: source?.folder.name ?? playerState.sourceFolder,
+        audioPosition: position,
+        audioDuration: duration,
+        capturedAt: Date.now(),
+        passage: md ? extractPassage(md, position, duration) : '',
+      });
+      return true;
+    } catch (err) {
+      console.error('Capture failed', err);
+      return false;
+    }
+  }, [currentFile, playerState, appState.audioFolderId, findSourceOf]);
 
-    const md = sourceFolderId ? await fetchMarkdownContent(sourceFolderId, file.name) : null;
-    const passage = md ? extractPassage(md, position, duration) : '';
+  const handleSettingsChange = useCallback((patch: Partial<AppSettings>): void => {
+    if (patch.autoRewindSeconds !== undefined) player.setAutoRewind(patch.autoRewindSeconds);
+    if (patch.skipForwardSeconds !== undefined) player.setSkipSeconds(patch.skipForwardSeconds);
+    if (patch.voiceBoost !== undefined) player.setVoiceBoost(patch.voiceBoost);
+  }, [player]);
 
-    await appendCapture(audioFolderId, {
-      id: `${file.id}-${Date.now()}`,
-      fileId: file.id,
-      fileName: file.name,
-      sourceFolder: source?.folder.name ?? '',
-      audioPosition: position,
-      audioDuration: duration,
-      capturedAt: Date.now(),
-      passage,
-    });
-  }, [playerState, appState.audioFolderId, appState.sources]);
+  const handleAddToQueue = useCallback((file: DriveFile): void => {
+    const source = findSourceOf(file);
+    player.addToCustomQueue(file, source?.folder.name ?? '');
+  }, [findSourceOf, player]);
 
-  const handlePlayFromSearch = useCallback(async (file: DriveFile, source: Source, fileIndex: number): Promise<void> => {
-    const sourceIndex = appState.sources.indexOf(source);
-    if (sourceIndex >= 0) setActiveSource(sourceIndex);
-    setQueueTabActive(false);
+  const handleSelectSource = useCallback((i: number): void => {
+    setView('source');
+    setActiveRestTime(null);
+    app.setActiveSource(i);
+  }, [app]);
 
-    const settings = await getSettings();
-    playerActions.setQueue(source.files, source.folder.name, fileIndex);
-    playerActions.setSpeed(settings.defaultSpeed);
-    playerActions.setSkipSeconds(settings.skipForwardSeconds);
+  const handleRefresh = useCallback((): void => { void app.refresh(); }, [app]);
 
-    const savedState = await getLocalPlaybackState(file.id);
-    await playerActions.loadAndPlay(file, source.folder.name, savedState?.position ?? 0);
-  }, [appState.sources, playerActions, setActiveSource]);
+  // ── Dérivés ───────────────────────────────────────────────────────────────
 
-  const handleArchiveCurrentPlaying = useCallback(async (): Promise<void> => {
-    const file = playerState.currentFile;
-    if (!file) return;
-    const source = appState.sources.find((s) => s.files.some((f) => f.id === file.id));
-    const sourceFolderId = source?.folder.id ?? '';
-    const sourceFolder = source?.folder.name ?? '';
-    await archiveFile(file.id, file.name, sourceFolder, sourceFolderId);
-    await playerActions.playNext();
-    setPlayerOpen(false);
-  }, [playerState.currentFile, appState.sources, archiveFile, playerActions]);
+  const activeSource = sources[appState.activeSourceIndex];
+  const currentFileSource = useMemo(
+    () => (currentFile ? findSourceOf(currentFile, playerState.sourceFolder) : undefined),
+    [currentFile, playerState.sourceFolder, findSourceOf],
+  );
+
+  const quantizedPosition = Math.floor(playerState.position / LIST_PROGRESS_STEP_S) * LIST_PROGRESS_STEP_S;
+  const livePlayback = useMemo<LivePlayback | null>(
+    () => (currentFile ? { fileId: currentFile.id, position: quantizedPosition, duration: playerState.duration } : null),
+    [currentFile, quantizedPosition, playerState.duration],
+  );
+
+  // ── Rendu ─────────────────────────────────────────────────────────────────
 
   if (appState.loading && !appState.authed) {
     return (
       <div className="min-h-screen bg-bg flex items-center justify-center">
-        <div className="w-8 h-8 rounded-full animate-spin" style={{ border: '2px solid var(--surface-3)', borderTopColor: 'var(--accent)' }} />
+        <Spinner size={32} />
       </div>
     );
   }
@@ -160,19 +182,75 @@ export default function App(): React.JSX.Element {
     return <AuthScreen error={appState.error} />;
   }
 
-  const activeSource = appState.sources[appState.activeSourceIndex];
-  const currentFileSource = appState.sources.find(
-    (s) => s.files.some((f) => f.id === playerState.currentFile?.id),
-  );
+  const renderContent = (): React.ReactNode => {
+    if (appState.loading) return <CenteredSpinner />;
+
+    switch (view) {
+      case 'archive':
+        return appState.audioFolderId ? (
+          <ArchiveList
+            audioFolderId={appState.audioFolderId}
+            online={online}
+            onPlay={handlePlayArchived}
+            onUnarchived={handleRefresh}
+          />
+        ) : (
+          <EmptyState title="Archive indisponible hors-ligne" />
+        );
+      case 'stats':
+        return <Dashboard />;
+      case 'queue':
+        return (
+          <QueueList
+            queue={playerState.customQueue}
+            onRemove={player.removeFromCustomQueue}
+            onClear={() => { player.clearCustomQueue(); setView('source'); }}
+            onPlayNow={(item, index) => {
+              player.removeFromCustomQueue(index);
+              void player.startPlayback(item.file, item.sourceFolder);
+            }}
+          />
+        );
+      case 'source':
+        if (!activeSource) return <EmptyState title="Créez des sous-dossiers dans Audio/ sur Drive" />;
+        return (
+          <>
+            {normalizeFolderName(activeSource.folder.name).startsWith('synthese') && (
+              <SynthesisPanel
+                sources={sources}
+                online={online}
+                onArchiveMany={async (items, weekKey) => {
+                  const result = await app.archiveMany(items, weekKey);
+                  await app.refreshQueueCount();
+                  return result;
+                }}
+              />
+            )}
+            <FileList
+              files={activeSource.files}
+              sourceFolder={activeSource.folder.name}
+              sourceFolderId={activeSource.folder.id}
+              currentFileId={currentFile?.id ?? null}
+              livePlayback={livePlayback}
+              onPlay={handlePlayFile}
+              onArchive={handleArchive}
+              onAddToQueue={handleAddToQueue}
+              isOnline={online}
+              onRefresh={handleRefresh}
+              onRestTimeChange={setActiveRestTime}
+            />
+          </>
+        );
+    }
+  };
 
   return (
     <div className="min-h-screen bg-bg text-text-1" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
       {!online && <OfflineBanner pendingCount={appState.pendingQueueCount} />}
 
-      {/* Centered column — full-width on mobile, max 640px on desktop */}
+      {/* Colonne centrée : pleine largeur sur mobile, 640px max sur desktop */}
       <div className="mx-auto flex flex-col lg:border-x lg:border-border-1" style={{ maxWidth: 640, minHeight: '100dvh' }}>
 
-        {/* Header */}
         <header
           className="flex items-center justify-between bg-surface-1 border-b border-border-1 px-4"
           style={{ minHeight: 48, paddingBottom: 12, paddingTop: 8 }}
@@ -183,38 +261,22 @@ export default function App(): React.JSX.Element {
           </div>
 
           <div className="flex items-center">
-            <button
-              onClick={() => setSearchOpen(true)}
-              className="w-11 h-11 flex items-center justify-center text-text-3 hover:text-text-1 transition-colors"
-              title="Rechercher"
-            >
+            <IconButton label="Rechercher" onClick={() => setOverlay('search')}>
               <SearchIcon size={20} />
-            </button>
-            <button
-              onClick={toggleTheme}
-              className="w-11 h-11 flex items-center justify-center text-text-3 hover:text-text-1 transition-colors"
-              title={theme === 'dark' ? 'Thème clair' : 'Thème sombre'}
-            >
+            </IconButton>
+            <IconButton label={theme === 'dark' ? 'Thème clair' : 'Thème sombre'} onClick={toggleTheme}>
               {theme === 'dark' ? <SunIcon size={20} /> : <MoonIcon size={20} />}
-            </button>
-            <button
-              onClick={() => void refresh()}
-              disabled={appState.loading}
-              className="w-11 h-11 flex items-center justify-center text-text-3 hover:text-text-1 transition-colors"
-              title="Actualiser"
-            >
-              <RefreshIcon size={20} className={appState.loading ? 'animate-spin' : ''} />
-            </button>
+            </IconButton>
+            <IconButton label="Actualiser" onClick={handleRefresh} disabled={appState.refreshing || !online} aria-busy={appState.refreshing}>
+              <RefreshIcon size={20} className={appState.refreshing ? 'animate-spin' : ''} />
+            </IconButton>
             <div className="relative">
-              <button
-                onClick={() => setSettingsOpen(true)}
-                className="w-11 h-11 flex items-center justify-center text-text-3 hover:text-text-1 transition-colors"
-                title="Paramètres"
-              >
+              <IconButton label="Paramètres" onClick={() => setOverlay('settings')}>
                 <SettingsIcon size={20} />
-              </button>
+              </IconButton>
               {appState.pendingQueueCount > 0 && (
                 <span
+                  aria-hidden
                   className="absolute rounded-full bg-accent pointer-events-none"
                   style={{ width: 8, height: 8, top: 8, right: 8, boxShadow: '0 0 0 2px var(--surface-1)' }}
                 />
@@ -223,170 +285,65 @@ export default function App(): React.JSX.Element {
           </div>
         </header>
 
-        {/* Source tabs */}
         <SourceTabs
-          sources={appState.sources}
+          sources={sources}
           activeIndex={appState.activeSourceIndex}
-          onSelect={(i) => { setQueueTabActive(false); setStatsTabActive(false); setArchiveTabActive(false); setActiveRestTime(null); setActiveSource(i); }}
+          view={view}
+          onSelectSource={handleSelectSource}
+          onSelectView={setView}
           queueCount={playerState.customQueue.length}
-          queueActive={queueTabActive}
-          onQueueSelect={() => { setStatsTabActive(false); setArchiveTabActive(false); setQueueTabActive(true); }}
-          statsActive={statsTabActive}
-          onStatsSelect={() => { setQueueTabActive(false); setArchiveTabActive(false); setStatsTabActive(true); }}
-          archiveActive={archiveTabActive}
-          onArchiveSelect={() => { setQueueTabActive(false); setStatsTabActive(false); setArchiveTabActive(true); }}
-          activeRestTime={activeRestTime ?? undefined}
+          activeRestTime={activeRestTime}
         />
 
-        {/* File list */}
-        <div
+        <main
           className="flex-1 overflow-y-auto"
-          style={{ paddingBottom: playerState.currentFile ? 'calc(80px + env(safe-area-inset-bottom))' : '0' }}
+          style={{ paddingBottom: currentFile ? 'calc(80px + env(safe-area-inset-bottom))' : '0' }}
         >
-          {appState.error && (
-            <div className="mx-4 mt-4 p-3 bg-red-500/20 border border-red-500/40 rounded-xl text-red-300 text-sm">
-              {appState.error}
-            </div>
-          )}
-          {appState.loading ? (
-            <div className="flex items-center justify-center py-16">
-              <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
-            </div>
-          ) : archiveTabActive ? (
-            appState.audioFolderId ? (
-              <ArchiveList
-                audioFolderId={appState.audioFolderId}
-                online={online}
-                onPlay={(file, queue, index) => void handlePlayArchived(file, queue, index)}
-                onUnarchived={() => void refresh()}
-              />
-            ) : (
-              <div className="flex flex-col items-center justify-center py-16" style={{ color: 'var(--text-3)' }}>
-                <p style={{ fontSize: 14 }}>Archive indisponible hors-ligne</p>
-              </div>
-            )
-          ) : statsTabActive ? (
-            <Dashboard />
-          ) : queueTabActive ? (
-            <QueueList
-              queue={playerState.customQueue}
-              currentFileId={playerState.currentFile?.id ?? null}
-              onRemove={playerActions.removeFromCustomQueue}
-              onClear={() => { playerActions.clearCustomQueue(); setQueueTabActive(false); }}
-              onPlayNow={async (item, index) => {
-                playerActions.removeFromCustomQueue(index);
-                const savedState = await getLocalPlaybackState(item.file.id);
-                const settings = await getSettings();
-                playerActions.setSpeed(settings.defaultSpeed);
-                playerActions.setSkipSeconds(settings.skipForwardSeconds);
-                await playerActions.loadAndPlay(item.file, item.sourceFolder, savedState?.position ?? 0);
-              }}
-            />
-          ) : activeSource ? (
-            <>
-              {normalizeFolderName(activeSource.folder.name).startsWith('synthese') && (
-                <SynthesisPanel
-                  sources={appState.sources}
-                  online={online}
-                  onArchiveMany={async (items, weekKey) => {
-                    const result = await archiveMany(items, weekKey);
-                    await refreshQueueCount();
-                    return result;
-                  }}
-                />
-              )}
-              <FileList
-                files={activeSource.files}
-                sourceFolder={activeSource.folder.name}
-                sourceFolderId={activeSource.folder.id}
-                currentFileId={playerState.currentFile?.id ?? null}
-                onPlay={(file, index) => void handlePlayFile(file, index)}
-                onArchive={(file) => void handleArchive(file)}
-                onAddToQueue={(file) => {
-                  playerActions.addToCustomQueue(file, activeSource.folder.name);
-                }}
-                isOnline={online}
-                onRefresh={() => void refresh()}
-                onRestTimeChange={(t) => setActiveRestTime(t)}
-              />
-            </>
-          ) : (
-            <div className="flex flex-col items-center justify-center py-16" style={{ color: 'var(--text-3)' }}>
-              <p style={{ fontSize: 14 }}>Créez des sous-dossiers dans Audio/ sur Drive</p>
-            </div>
-          )}
-        </div>
+          {appState.error && <ErrorBox>{appState.error}</ErrorBox>}
+          {renderContent()}
+        </main>
       </div>
 
-      {/* Mini player — fixed, responsive on desktop */}
-      {playerState.currentFile && !playerOpen && (
+      {currentFile && overlay !== 'player' && (
         <PlayerBar
-          playerState={playerState}
-          sourceFolder={currentFileSource?.folder.name}
-          onPlayPause={() =>
-            playerState.isPlaying ? playerActions.pause() : void playerActions.play()
-          }
-          onExpand={() => setPlayerOpen(true)}
+          file={currentFile}
+          sourceFolder={playerState.sourceFolder}
+          isPlaying={playerState.isPlaying}
+          position={playerState.position}
+          duration={playerState.duration}
+          onPlayPause={player.togglePlay}
+          onExpand={() => setOverlay('player')}
         />
       )}
 
-      {/* Full player */}
-      {playerOpen && playerState.currentFile && (
+      {overlay === 'player' && currentFile && (
         <PlayerFull
           playerState={playerState}
-          onPlayPause={() =>
-            playerState.isPlaying ? playerActions.pause() : void playerActions.play()
-          }
-          onNext={() => playerActions.playNext()}
-          onPrevious={() => playerActions.playPrevious()}
-          onSeek={playerActions.seekTo}
-          onSkipForward={playerActions.skipForward}
-          onSkipBackward={playerActions.skipBackward}
-          onSetSpeed={playerActions.setSpeed}
-          onArchive={() => void handleArchiveCurrentPlaying()}
-          onCapture={() => void handleCapture()}
-          onClose={() => setPlayerOpen(false)}
-          skipSeconds={player_skipSeconds()}
+          actions={player}
+          onArchive={handleArchiveCurrentPlaying}
+          onCapture={handleCapture}
+          onClose={closeOverlay}
           sourceFolderId={currentFileSource?.folder.id}
-          sourceFolder={currentFileSource?.folder.name}
         />
       )}
 
-      {/* Captures */}
-      {capturesOpen && appState.audioFolderId && (
-        <CapturesList
-          audioFolderId={appState.audioFolderId}
-          onClose={() => setCapturesOpen(false)}
-        />
+      {overlay === 'captures' && appState.audioFolderId && (
+        <CapturesList audioFolderId={appState.audioFolderId} onClose={closeOverlay} />
       )}
 
-      {/* Search */}
-      {searchOpen && (
-        <SearchBar
-          sources={appState.sources}
-          onPlay={(file, source, fileIndex) => void handlePlayFromSearch(file, source, fileIndex)}
-          onClose={() => setSearchOpen(false)}
-        />
+      {overlay === 'search' && (
+        <SearchBar sources={sources} onPlay={handlePlayFromSearch} onClose={closeOverlay} />
       )}
 
-      {/* Settings */}
-      {settingsOpen && (
+      {overlay === 'settings' && (
         <Settings
-          onClose={() => setSettingsOpen(false)}
+          onClose={closeOverlay}
           audioFolderId={appState.audioFolderId}
-          onResync={() => void refresh()}
-          onShowCaptures={() => { setSettingsOpen(false); setCapturesOpen(true); }}
-          onSettingsChange={(key, value) => {
-            if (key === 'autoRewindSeconds') playerActions.setAutoRewind(value as number);
-            if (key === 'skipForwardSeconds' || key === 'skipBackwardSeconds') playerActions.setSkipSeconds(value as number);
-            if (key === 'voiceBoost') playerActions.setVoiceBoost(value as boolean);
-          }}
+          onResync={handleRefresh}
+          onShowCaptures={() => setOverlay('captures')}
+          onSettingsChange={handleSettingsChange}
         />
       )}
     </div>
   );
-}
-
-function player_skipSeconds(): number {
-  return 30;
 }

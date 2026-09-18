@@ -1,15 +1,18 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { player } from '../player/player';
 import { getSettings } from '../state/db';
+import { getLocalPlaybackState } from '../state/driveState';
 import type { DriveFile } from '../drive/types';
 import type { PlayerEvent, QueuedFile } from '../player/player';
 
 export interface PlayerHookState {
   currentFile: DriveFile | null;
+  sourceFolder: string;
   isPlaying: boolean;
   position: number;
   duration: number;
   speed: number;
+  skipSeconds: number;
   buffering: boolean;
   error: string | null;
   currentIndex: number;
@@ -19,12 +22,35 @@ export interface PlayerHookState {
 
 export type { QueuedFile };
 
+export interface PlayerActions {
+  play: () => Promise<void>;
+  pause: () => void;
+  togglePlay: () => void;
+  seekTo: (t: number) => void;
+  skipForward: () => void;
+  skipBackward: () => void;
+  playNext: () => Promise<void>;
+  playPrevious: () => Promise<void>;
+  setSpeed: (s: number) => void;
+  setSkipSeconds: (s: number) => void;
+  setAutoRewind: (s: number) => void;
+  setVoiceBoost: (enabled: boolean) => void;
+  // Démarre un fichier avec les réglages courants et sa position sauvegardée.
+  // `queue` remplace la file de lecture du dossier ; omise, on garde l'actuelle.
+  startPlayback: (file: DriveFile, sourceFolder: string, queue?: { files: DriveFile[]; index: number }) => Promise<void>;
+  addToCustomQueue: (file: DriveFile, sourceFolder: string) => void;
+  removeFromCustomQueue: (index: number) => void;
+  clearCustomQueue: () => void;
+}
+
 const initialState: PlayerHookState = {
   currentFile: null,
+  sourceFolder: '',
   isPlaying: false,
   position: 0,
   duration: 0,
   speed: 1,
+  skipSeconds: 30,
   buffering: false,
   error: null,
   currentIndex: -1,
@@ -32,36 +58,24 @@ const initialState: PlayerHookState = {
   customQueue: [],
 };
 
-export function usePlayer(onArchive?: (fileId: string, fileName: string, sourceFolder: string) => void): {
-  state: PlayerHookState;
-  play: () => Promise<void>;
-  pause: () => void;
-  seekTo: (t: number) => void;
-  skipForward: (s: number) => void;
-  skipBackward: (s: number) => void;
-  playNext: () => Promise<void>;
-  playPrevious: () => Promise<void>;
-  setSpeed: (s: number) => void;
-  loadAndPlay: (file: DriveFile, source: string, startPos?: number) => Promise<void>;
-  setQueue: (files: DriveFile[], source: string, startIndex?: number) => void;
-  setSkipSeconds: (s: number) => void;
-  setAutoRewind: (s: number) => void;
-  setVoiceBoost: (enabled: boolean) => void;
-  addToCustomQueue: (file: DriveFile, sourceFolder: string) => void;
-  removeFromCustomQueue: (index: number) => void;
-  clearCustomQueue: () => void;
-} {
+export type ArchiveHandler = (file: DriveFile, sourceFolder: string) => void;
+
+export function usePlayer(onArchive?: ArchiveHandler): { state: PlayerHookState; actions: PlayerActions } {
   const [state, setState] = useState<PlayerHookState>(initialState);
+  const onArchiveRef = useRef(onArchive);
+  onArchiveRef.current = onArchive;
 
   useEffect(() => {
     void getSettings().then((s) => {
       player.setAutoRewind(s.autoRewindSeconds);
       player.setVoiceBoost(s.voiceBoost);
+      player.setSkipSeconds(s.skipForwardSeconds);
+      setState((prev) => ({ ...prev, skipSeconds: s.skipForwardSeconds }));
     });
   }, []);
 
   useEffect(() => {
-    const off = player.on((event: PlayerEvent) => {
+    return player.on((event: PlayerEvent) => {
       switch (event.type) {
         case 'timeupdate':
           setState((s) => ({ ...s, position: event.position, duration: event.duration }));
@@ -85,6 +99,7 @@ export function usePlayer(onArchive?: (fileId: string, fileName: string, sourceF
           setState((s) => ({
             ...s,
             currentFile: event.file,
+            sourceFolder: event.sourceFolder,
             currentIndex: event.index,
             queue: player.getQueue(),
             position: 0,
@@ -92,42 +107,56 @@ export function usePlayer(onArchive?: (fileId: string, fileName: string, sourceF
           }));
           break;
         case 'archive':
-          onArchive?.(event.fileId, event.fileName, event.sourceFolder);
+          onArchiveRef.current?.(event.file, event.sourceFolder);
           break;
         case 'queueupdate':
           setState((s) => ({ ...s, customQueue: event.customQueue }));
           break;
       }
     });
-    return off;
-  }, [onArchive]);
-
-  const loadAndPlay = useCallback(async (file: DriveFile, source: string, startPos = 0) => {
-    await player.loadAndPlay(file, source, startPos);
   }, []);
 
-  const setQueue = useCallback((files: DriveFile[], source: string, startIndex = 0) => {
-    player.setQueue(files, source, startIndex);
-    setState((s) => ({ ...s, queue: [...files], currentIndex: startIndex }));
+  // Toutes les actions délèguent au singleton : identité stable, les
+  // composants mémoïsés ne se re-rendent pas à chaque timeupdate
+  const actions = useMemo<PlayerActions>(() => {
+    const setSpeed = (s: number): void => {
+      player.setSpeed(s);
+      setState((prev) => ({ ...prev, speed: s }));
+    };
+    const setSkipSeconds = (s: number): void => {
+      player.setSkipSeconds(s);
+      setState((prev) => ({ ...prev, skipSeconds: s }));
+    };
+
+    return {
+      play: () => player.play(),
+      pause: () => player.pause(),
+      togglePlay: () => { if (player.isPlaying()) player.pause(); else void player.play(); },
+      seekTo: (t) => player.seekTo(t),
+      skipForward: () => player.skipForward(),
+      skipBackward: () => player.skipBackward(),
+      playNext: () => player.playNext(),
+      playPrevious: () => player.playPrevious(),
+      setSpeed,
+      setSkipSeconds,
+      setAutoRewind: (s) => player.setAutoRewind(s),
+      setVoiceBoost: (enabled) => player.setVoiceBoost(enabled),
+      startPlayback: async (file, sourceFolder, queue) => {
+        const settings = await getSettings();
+        if (queue) {
+          player.setQueue(queue.files, sourceFolder, queue.index);
+          setState((s) => ({ ...s, queue: [...queue.files], currentIndex: queue.index }));
+        }
+        setSpeed(settings.defaultSpeed);
+        setSkipSeconds(settings.skipForwardSeconds);
+        const saved = await getLocalPlaybackState(file.id);
+        await player.loadAndPlay(file, sourceFolder, saved?.position ?? 0);
+      },
+      addToCustomQueue: (file, sourceFolder) => player.addToCustomQueue(file, sourceFolder),
+      removeFromCustomQueue: (index) => player.removeFromCustomQueue(index),
+      clearCustomQueue: () => player.clearCustomQueue(),
+    };
   }, []);
 
-  return {
-    state,
-    play: () => player.play(),
-    pause: () => player.pause(),
-    seekTo: (t) => player.seekTo(t),
-    skipForward: (s) => player.skip(s),
-    skipBackward: (s) => player.skip(-s),
-    playNext: () => player.playNext(),
-    playPrevious: () => player.playPrevious(),
-    setSpeed: (s) => { player.setSpeed(s); setState((prev) => ({ ...prev, speed: s })); },
-    loadAndPlay,
-    setQueue,
-    setSkipSeconds: (s: number) => { player.skipSeconds = s; },
-    setAutoRewind: (s: number) => { player.setAutoRewind(s); },
-    setVoiceBoost: (enabled: boolean) => { player.setVoiceBoost(enabled); },
-    addToCustomQueue: (file: DriveFile, sourceFolder: string) => { player.addToCustomQueue(file, sourceFolder); },
-    removeFromCustomQueue: (index: number) => { player.removeFromCustomQueue(index); },
-    clearCustomQueue: () => { player.clearCustomQueue(); },
-  };
+  return { state, actions };
 }

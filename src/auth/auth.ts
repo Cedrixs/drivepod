@@ -1,11 +1,22 @@
 import { getDB } from '../state/db';
+import type { StoredTokens } from '../drive/types';
+
+const SW_TOKEN_CACHE = 'dp-sw-tokens';
+const SW_TOKEN_KEY = '/sw-token';
+
+// Le SW lit le token dans le Cache API (il n'a pas accès à l'IndexedDB
+// chiffré). On n'écrit que si le token a changé : getAccessToken() est appelé
+// avant chaque requête Drive.
+let lastTokenStoredForSW: string | null = null;
 
 async function storeTokenForSW(token: string): Promise<void> {
+  if (token === lastTokenStoredForSW) return;
   try {
-    const cache = await caches.open('dp-sw-tokens');
-    await cache.put('/sw-token', new Response(JSON.stringify({ token }), {
+    const cache = await caches.open(SW_TOKEN_CACHE);
+    await cache.put(SW_TOKEN_KEY, new Response(JSON.stringify({ token }), {
       headers: { 'Content-Type': 'application/json' },
     }));
+    lastTokenStoredForSW = token;
   } catch { /* non-critical */ }
 }
 
@@ -17,7 +28,7 @@ const REVOKE_ENDPOINT = 'https://oauth2.googleapis.com/revoke';
 const SCOPE = 'https://www.googleapis.com/auth/drive';
 const ENC_KEY_STORAGE = 'dp_enc_key';
 
-// localStorage keys for PKCE — sessionStorage is unreliable on Android during OAuth redirects
+// localStorage keys for PKCE : sessionStorage is unreliable on Android during OAuth redirects
 const PKCE_VERIFIER_KEY = 'dp_pkce_verifier';
 const PKCE_STATE_KEY = 'dp_oauth_state';
 const PKCE_EXPIRY_KEY = 'dp_pkce_expiry';
@@ -195,18 +206,12 @@ export async function handleOAuthCallback(): Promise<OAuthCallbackResult> {
   return { ok: true };
 }
 
-interface StoredTokens {
-  accessToken: string;
-  encryptedRefreshToken: string | null;
-  expiresAt: number;
-}
-
 // Single-flight : les appels concurrents attendent le même refresh
 let refreshInFlight: Promise<string> | null = null;
 
 export async function getAccessToken(): Promise<string> {
   const db = await getDB();
-  const stored = await db.get('tokens', 'main') as StoredTokens | undefined;
+  const stored = await db.get('tokens', 'main');
 
   if (!stored) throw new Error('NOT_AUTHENTICATED');
 
@@ -231,7 +236,7 @@ async function refreshAccessToken(stored: StoredTokens): Promise<string> {
     refresh_token: refreshToken,
   };
   // Les clients OAuth "Web application" exigent le client_secret sur TOUS les
-  // grants, y compris refresh_token — sans lui Google répond 401 invalid_client
+  // grants, y compris refresh_token : sans lui Google répond 401 invalid_client
   // et l'utilisateur était déconnecté à chaque expiration du token (1 h).
   if (CLIENT_SECRET) params['client_secret'] = CLIENT_SECRET;
   const body = new URLSearchParams(params);
@@ -278,12 +283,12 @@ async function refreshAccessToken(stored: StoredTokens): Promise<string> {
 export async function invalidateAccessToken(): Promise<void> {
   try {
     const db = await getDB();
-    const stored = await db.get('tokens', 'main') as StoredTokens | undefined;
+    const stored = await db.get('tokens', 'main');
     if (stored) await db.put('tokens', { ...stored, expiresAt: 0 }, 'main');
   } catch { /* ignore */ }
 }
 
-// Ne supprime que les credentials — positions de lecture, file offline et
+// Ne supprime que les credentials : positions de lecture, file offline et
 // audio en cache survivent : une reconnexion restaure la session à l'identique.
 async function clearTokensOnly(): Promise<void> {
   try {
@@ -291,9 +296,10 @@ async function clearTokensOnly(): Promise<void> {
     await db.clear('tokens');
   } catch { /* ignore */ }
   try {
-    const cache = await caches.open('dp-sw-tokens');
-    await cache.delete('/sw-token');
+    const cache = await caches.open(SW_TOKEN_CACHE);
+    await cache.delete(SW_TOKEN_KEY);
   } catch { /* ignore */ }
+  lastTokenStoredForSW = null;
 }
 
 export async function isAuthenticated(): Promise<boolean> {
@@ -309,10 +315,7 @@ export async function isAuthenticated(): Promise<boolean> {
 export async function signOut(): Promise<void> {
   try {
     const db = await getDB();
-    const stored = await db.get('tokens', 'main') as {
-      accessToken: string;
-      encryptedRefreshToken: string | null;
-    } | undefined;
+    const stored = await db.get('tokens', 'main');
 
     if (stored?.encryptedRefreshToken) {
       try {
@@ -326,6 +329,9 @@ export async function signOut(): Promise<void> {
     await db.clear('tokens');
     await db.clear('playback');
     await db.clear('offlineQueue');
+    // Les blobs audio sont supprimés avec les caches ci-dessous : sans ce
+    // clear, le mode hors-ligne listerait des fichiers fantômes
+    await db.clear('fileCache');
   } catch {
     // ignore
   }

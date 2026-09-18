@@ -1,20 +1,8 @@
 import { useState, useEffect } from 'react';
 import { XIcon } from './icons';
-import { readNotesFile } from '../drive/api';
-import type { CapturedPassage } from '../drive/api';
-
-function formatTime(seconds: number): string {
-  if (!isFinite(seconds) || seconds < 0) return '0:00';
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = Math.floor(seconds % 60);
-  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-  return `${m}:${String(s).padStart(2, '0')}`;
-}
-
-function formatDate(ts: number): string {
-  return new Date(ts).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-}
+import { readNotesFile, type CapturedPassage } from '../state/captures';
+import { formatTime, formatDateTime, stripMp3 } from '../lib/format';
+import { FullscreenPanel, PanelHeader, CenteredSpinner, EmptyState, ErrorBox } from './primitives';
 
 interface Props {
   audioFolderId: string;
@@ -22,51 +10,44 @@ interface Props {
 }
 
 export function CapturesList({ audioFolderId, onClose }: Props): React.JSX.Element {
-  const [captures, setCaptures] = useState<CapturedPassage[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [captures, setCaptures] = useState<CapturedPassage[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    void readNotesFile(audioFolderId).then((notes) => {
-      setCaptures(notes?.captures.slice().reverse() ?? []);
-      setLoading(false);
-    });
+    let cancelled = false;
+    readNotesFile(audioFolderId)
+      .then((notes) => { if (!cancelled) setCaptures(notes?.captures.slice().reverse() ?? []); })
+      .catch(() => { if (!cancelled) { setCaptures([]); setError('Impossible de charger les passages capturés.'); } });
+    return () => { cancelled = true; };
   }, [audioFolderId]);
 
   return (
-    <div
-      className="fixed inset-0 bg-navy-900 z-50 flex flex-col"
-      style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}
-    >
-      <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 bg-navy-800">
-        <h2 className="text-base font-semibold text-white">Passages capturés</h2>
-        <button onClick={onClose} className="p-2 text-white/60 hover:text-white">
-          <XIcon size={20} />
-        </button>
-      </div>
+    <FullscreenPanel>
+      <PanelHeader title="Passages capturés" onClose={onClose} closeIcon={<XIcon size={20} />} />
 
       <div className="flex-1 overflow-y-auto">
-        {loading ? (
-          <div className="flex justify-center py-16">
-            <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
-          </div>
-        ) : captures.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-white/40">
-            <p className="text-sm">Aucun passage capturé</p>
-            <p className="text-xs mt-2">Appuyez sur le signet dans le lecteur pour capturer</p>
-          </div>
+        {error && <ErrorBox>{error}</ErrorBox>}
+        {captures === null ? (
+          <CenteredSpinner />
+        ) : captures.length === 0 && !error ? (
+          <EmptyState title="Aucun passage capturé" hint="Appuyez sur le signet dans le lecteur pour capturer" />
         ) : (
           captures.map((c) => (
-            <div key={c.id} className="px-4 py-4 border-b border-white/5">
-              <p className="text-sm font-medium text-white truncate">
-                {c.fileName.replace(/\.mp3$/i, '')}
+            <div key={c.id} style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-1)' }}>
+              <p className="truncate" style={{ fontFamily: 'var(--font-sans)', fontSize: 14, fontWeight: 500, color: 'var(--text-1)', margin: 0 }}>
+                {stripMp3(c.fileName)}
               </p>
-              <div className="flex items-center gap-2 mt-0.5 mb-2">
-                <span className="text-xs text-white/30 bg-white/5 rounded px-1.5 py-0.5">{c.sourceFolder}</span>
-                <span className="text-xs text-white/30">à {formatTime(c.audioPosition)}</span>
-                <span className="text-xs text-white/20">{formatDate(c.capturedAt)}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '4px 0 8px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-3)' }}>
+                {c.sourceFolder && (
+                  <span style={{ color: 'var(--accent)', background: 'var(--accent-soft)', borderRadius: 4, padding: '2px 6px' }}>
+                    {c.sourceFolder}
+                  </span>
+                )}
+                <span>à {formatTime(c.audioPosition)}</span>
+                <span style={{ color: 'var(--text-4)' }}>{formatDateTime(c.capturedAt)}</span>
               </div>
               {c.passage && (
-                <p className="text-xs text-white/50 leading-relaxed">
+                <p style={{ fontFamily: 'var(--font-sans)', fontSize: 13, lineHeight: 1.55, color: 'var(--text-2)', margin: 0 }}>
                   …{c.passage}…
                 </p>
               )}
@@ -74,6 +55,6 @@ export function CapturesList({ audioFolderId, onClose }: Props): React.JSX.Eleme
           ))
         )}
       </div>
-    </div>
+    </FullscreenPanel>
   );
 }

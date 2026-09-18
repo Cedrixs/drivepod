@@ -4,17 +4,19 @@ import {
   parseWeekKey, isoWeekKey, sortSynthesesDesc, selectFilesToBulkArchive,
   type BulkCandidate,
 } from '../state/archiveRules';
+import { plural } from '../lib/format';
 import { ArchiveIcon, ChevronDownIcon, ChevronUpIcon } from './icons';
-import type { Source } from '../hooks/useApp';
-import type { DriveFile } from '../drive/types';
+import { Spinner, IconButton } from './primitives';
+import type { ArchiveResult } from '../hooks/useApp';
+import type { Source, DriveFile } from '../drive/types';
 
 interface Props {
   sources: Source[];
   online: boolean;
-  onArchiveMany: (items: BulkCandidate[], destWeekKey: string) => Promise<{ ok: number; fail: number }>;
+  onArchiveMany: (items: BulkCandidate[], destWeekKey: string) => Promise<ArchiveResult>;
 }
 
-// Rendu markdown minimal (titres, gras, paragraphes) — les synthèses sont de
+// Rendu markdown minimal (titres, gras, paragraphes) : les synthèses sont de
 // la prose TTS, pas besoin d'un parseur complet
 function renderMarkdownLite(md: string): React.JSX.Element[] {
   const blocks = md.split(/\n{2,}/);
@@ -59,6 +61,8 @@ function synthesisLabel(file: DriveFile): string {
   return new Date(file.createdTime).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
 }
 
+const CARD_TEXT: React.CSSProperties = { fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--text-2)', margin: 0 };
+
 export function SynthesisPanel({ sources, online, onArchiveMany }: Props): React.JSX.Element | null {
   const [syntheses, setSyntheses] = useState<DriveFile[] | null>(null);
   const [index, setIndex] = useState(0);
@@ -88,19 +92,23 @@ export function SynthesisPanel({ sources, online, onArchiveMany }: Props): React
   useEffect(() => {
     if (!current || texts.has(current.id)) return;
     let cancelled = false;
-    void (async () => {
-      const text = await fetchFileText(current.id);
-      if (!cancelled && text !== null) {
-        setTexts((m) => new Map(m).set(current.id, text));
-      }
-    })();
+    void fetchFileText(current.id).then((text) => {
+      if (!cancelled && text !== null) setTexts((m) => new Map(m).set(current.id, text));
+    });
     return () => { cancelled = true; };
   }, [current, texts]);
 
-  const candidates = useMemo(() => {
-    if (!current) return [];
-    return selectFilesToBulkArchive(sources, current.createdTime);
-  }, [current, sources]);
+  // Changer de semaine remet la zone d'action à zéro (message de résultat, confirmation)
+  const goTo = useCallback((next: number): void => {
+    setIndex(next);
+    setResultMsg(null);
+    setConfirmOpen(false);
+  }, []);
+
+  const candidates = useMemo(
+    () => (current ? selectFilesToBulkArchive(sources, current.createdTime) : []),
+    [current, sources],
+  );
 
   const candidatesByFolder = useMemo(() => {
     const counts = new Map<string, number>();
@@ -116,8 +124,8 @@ export function SynthesisPanel({ sources, online, onArchiveMany }: Props): React
       const weekKey = parseWeekKey(current.name) ?? isoWeekKey(new Date(current.createdTime));
       const { ok, fail } = await onArchiveMany(candidates, weekKey);
       setResultMsg(fail > 0
-        ? `${ok} archivé(s), ${fail} échec(s) — actualisez pour vérifier.`
-        : `${ok} audio archivé(s) dans ${weekKey}.`);
+        ? `${ok} ${plural(ok, 'archivé')}, ${fail} ${plural(fail, 'échec')} : actualisez pour vérifier.`
+        : `${ok} audio ${plural(ok, 'archivé')} dans ${weekKey}.`);
     } finally {
       setArchiving(false);
     }
@@ -126,15 +134,14 @@ export function SynthesisPanel({ sources, online, onArchiveMany }: Props): React
   if (syntheses === null) {
     return (
       <div className="mx-4 mt-4 p-4 rounded-xl bg-surface-2 border border-border-1 flex justify-center">
-        <div className="w-5 h-5 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+        <Spinner size={20} />
       </div>
     );
   }
 
   if (!current) {
     return (
-      <div className="mx-4 mt-4 p-4 rounded-xl bg-surface-2 border border-border-1"
-        style={{ fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--text-3)' }}>
+      <div className="mx-4 mt-4 p-4 rounded-xl bg-surface-2 border border-border-1" style={{ ...CARD_TEXT, color: 'var(--text-3)' }}>
         {error ?? (online
           ? 'Aucune synthèse écrite trouvée dans PDF/Textes IA.'
           : 'Synthèses écrites indisponibles hors-ligne.')}
@@ -143,21 +150,18 @@ export function SynthesisPanel({ sources, online, onArchiveMany }: Props): React
   }
 
   const text = texts.get(current.id);
+  const isOldest = index >= syntheses.length - 1;
+  const isNewest = index <= 0;
 
   return (
-    <div className="mx-4 mt-4 rounded-xl bg-surface-2 border border-border-1 overflow-hidden">
-      {/* Header : navigation entre semaines */}
-      <div className="flex items-center justify-between px-4" style={{ minHeight: 48 }}>
-        <button
-          onClick={() => setIndex((i) => Math.min(i + 1, (syntheses.length - 1)))}
-          disabled={index >= syntheses.length - 1}
-          className="w-9 h-9 flex items-center justify-center"
-          style={{ color: index >= syntheses.length - 1 ? 'var(--text-4)' : 'var(--text-1)', background: 'none', border: 'none', cursor: 'pointer', fontSize: 18 }}
-          title="Semaine précédente"
-        >
+    <section aria-label="Synthèse hebdomadaire" className="mx-4 mt-4 rounded-xl bg-surface-2 border border-border-1 overflow-hidden">
+      <div className="flex items-center justify-between px-2" style={{ minHeight: 48 }}>
+        <IconButton label="Semaine précédente" size={36} onClick={() => goTo(Math.min(index + 1, syntheses.length - 1))} disabled={isOldest} style={{ color: isOldest ? 'var(--text-4)' : 'var(--text-1)', fontSize: 18 }}>
           ‹
-        </button>
+        </IconButton>
         <button
+          type="button"
+          aria-expanded={expanded}
           onClick={() => setExpanded((e) => !e)}
           style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
         >
@@ -168,40 +172,28 @@ export function SynthesisPanel({ sources, online, onArchiveMany }: Props): React
             {expanded ? <ChevronUpIcon size={14} /> : <ChevronDownIcon size={14} />}
           </span>
         </button>
-        <button
-          onClick={() => setIndex((i) => Math.max(i - 1, 0))}
-          disabled={index <= 0}
-          className="w-9 h-9 flex items-center justify-center"
-          style={{ color: index <= 0 ? 'var(--text-4)' : 'var(--text-1)', background: 'none', border: 'none', cursor: 'pointer', fontSize: 18 }}
-          title="Semaine suivante"
-        >
+        <IconButton label="Semaine suivante" size={36} onClick={() => goTo(Math.max(index - 1, 0))} disabled={isNewest} style={{ color: isNewest ? 'var(--text-4)' : 'var(--text-1)', fontSize: 18 }}>
           ›
-        </button>
+        </IconButton>
       </div>
 
-      {/* Texte de la synthèse */}
       {expanded && (
         <div className="px-4 pb-3" style={{ maxHeight: '45vh', overflowY: 'auto' }}>
           {text === undefined ? (
-            <div className="flex justify-center py-6">
-              <div className="w-5 h-5 border-2 border-accent border-t-transparent rounded-full animate-spin" />
-            </div>
+            <div className="flex justify-center py-6"><Spinner size={20} /></div>
           ) : (
             renderMarkdownLite(text)
           )}
         </div>
       )}
 
-      {/* Archivage groupé */}
       <div className="px-4 py-3 border-t border-border-1">
         {resultMsg ? (
-          <p style={{ fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--text-2)', margin: 0 }}>
-            {resultMsg}
-          </p>
+          <p role="status" style={CARD_TEXT}>{resultMsg}</p>
         ) : confirmOpen ? (
           <div>
-            <p style={{ fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--text-2)', margin: '0 0 8px' }}>
-              Archiver {candidates.length} audio antérieur(s) à cette synthèse ?
+            <p style={{ ...CARD_TEXT, marginBottom: 8 }}>
+              Archiver {candidates.length} audio {plural(candidates.length, 'antérieur')} à cette synthèse ?
             </p>
             <ul style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-3)', margin: '0 0 10px', paddingLeft: 16 }}>
               {candidatesByFolder.map(([folder, count]) => (
@@ -210,13 +202,15 @@ export function SynthesisPanel({ sources, online, onArchiveMany }: Props): React
             </ul>
             <div className="flex gap-2">
               <button
+                type="button"
                 onClick={() => void handleArchive()}
                 className="px-3 py-2 rounded-lg"
-                style={{ fontFamily: 'var(--font-sans)', fontSize: 13, fontWeight: 600, background: 'var(--accent)', color: 'var(--surface-1)', border: 'none', cursor: 'pointer' }}
+                style={{ fontFamily: 'var(--font-sans)', fontSize: 13, fontWeight: 600, background: 'var(--accent)', color: 'var(--accent-text)', border: 'none', cursor: 'pointer' }}
               >
                 Confirmer l'archivage
               </button>
               <button
+                type="button"
                 onClick={() => setConfirmOpen(false)}
                 className="px-3 py-2 rounded-lg"
                 style={{ fontFamily: 'var(--font-sans)', fontSize: 13, background: 'var(--surface-3)', color: 'var(--text-1)', border: 'none', cursor: 'pointer' }}
@@ -227,8 +221,10 @@ export function SynthesisPanel({ sources, online, onArchiveMany }: Props): React
           </div>
         ) : (
           <button
+            type="button"
             onClick={() => setConfirmOpen(true)}
             disabled={archiving || candidates.length === 0}
+            aria-busy={archiving}
             className="flex items-center gap-2"
             style={{
               fontFamily: 'var(--font-sans)', fontSize: 13, fontWeight: 500,
@@ -246,6 +242,6 @@ export function SynthesisPanel({ sources, online, onArchiveMany }: Props): React
           </button>
         )}
       </div>
-    </div>
+    </section>
   );
 }

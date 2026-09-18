@@ -1,72 +1,44 @@
-import { openDB, type IDBPDatabase } from 'idb';
-import type { PlaybackState, OfflineAction, AppSettings } from '../drive/types';
+import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
+import type {
+  PlaybackState, OfflineAction, AppSettings, StoredTokens, CachedFileMeta, ListeningDay,
+} from '../drive/types';
 import { DEFAULT_SETTINGS } from '../drive/types';
 
-export interface DBSchema {
-  tokens: {
-    key: string;
-    value: {
-      accessToken: string;
-      encryptedRefreshToken: string | null;
-      expiresAt: number;
-    };
-  };
-  playback: {
-    key: string;
-    value: PlaybackState;
-    indexes: { 'by-source': string };
-  };
-  offlineQueue: {
-    key: string;
-    value: OfflineAction;
-    indexes: { 'by-created': number };
-  };
-  settings: {
-    key: string;
-    value: AppSettings | string | number | boolean;
-  };
-  fileCache: {
-    key: string;
-    value: {
-      fileId: string;
-      name: string;
-      sourceFolder: string;
-      sourceFolderId: string;
-      size: number;
-      cachedAt: number;
-    };
-    indexes: { 'by-source': string; 'by-cached': number };
-  };
+interface DrivePodDB extends DBSchema {
+  tokens: { key: string; value: StoredTokens };
+  playback: { key: string; value: PlaybackState; indexes: { 'by-source': string } };
+  offlineQueue: { key: string; value: OfflineAction; indexes: { 'by-created': number } };
+  settings: { key: string; value: AppSettings };
+  fileCache: { key: string; value: CachedFileMeta; indexes: { 'by-source': string; 'by-cached': number } };
+  listeningLog: { key: string; value: ListeningDay };
 }
 
-let dbPromise: Promise<IDBPDatabase> | null = null;
+export type DrivePodDatabase = IDBPDatabase<DrivePodDB>;
 
-export function getDB(): Promise<IDBPDatabase> {
+const DB_NAME = 'drivepod';
+const DB_VERSION = 3;
+
+let dbPromise: Promise<DrivePodDatabase> | null = null;
+
+export function getDB(): Promise<DrivePodDatabase> {
   if (!dbPromise) {
-    dbPromise = openDB('drivepod', 3, {
+    dbPromise = openDB<DrivePodDB>(DB_NAME, DB_VERSION, {
       upgrade(db, oldVersion) {
         if (oldVersion < 1) {
           db.createObjectStore('tokens');
-
           const playbackStore = db.createObjectStore('playback', { keyPath: 'fileId' });
           playbackStore.createIndex('by-source', 'sourceFolder');
-
           const queueStore = db.createObjectStore('offlineQueue', { keyPath: 'id' });
           queueStore.createIndex('by-created', 'createdAt');
-
           db.createObjectStore('settings');
         }
-        if (oldVersion < 2) {
-          if (!db.objectStoreNames.contains('fileCache')) {
-            const fileCacheStore = db.createObjectStore('fileCache', { keyPath: 'fileId' });
-            fileCacheStore.createIndex('by-source', 'sourceFolder');
-            fileCacheStore.createIndex('by-cached', 'cachedAt');
-          }
+        if (oldVersion < 2 && !db.objectStoreNames.contains('fileCache')) {
+          const fileCacheStore = db.createObjectStore('fileCache', { keyPath: 'fileId' });
+          fileCacheStore.createIndex('by-source', 'sourceFolder');
+          fileCacheStore.createIndex('by-cached', 'cachedAt');
         }
-        if (oldVersion < 3) {
-          if (!db.objectStoreNames.contains('listeningLog')) {
-            db.createObjectStore('listeningLog');
-          }
+        if (oldVersion < 3 && !db.objectStoreNames.contains('listeningLog')) {
+          db.createObjectStore('listeningLog');
         }
       },
       blocked() {
@@ -77,20 +49,28 @@ export function getDB(): Promise<IDBPDatabase> {
   return dbPromise;
 }
 
+// ── Settings ─────────────────────────────────────────────────────────────────
+
+const SETTINGS_KEY = 'main';
+
+// Fusion avec les défauts : un réglage ajouté après la première sauvegarde
+// de l'utilisateur prend sa valeur par défaut au lieu d'être undefined.
 export async function getSettings(): Promise<AppSettings> {
   const db = await getDB();
-  const stored = await db.get('settings', 'main') as AppSettings | undefined;
-  return stored ?? DEFAULT_SETTINGS;
+  const stored = await db.get('settings', SETTINGS_KEY);
+  return { ...DEFAULT_SETTINGS, ...stored };
 }
 
 export async function saveSettings(settings: AppSettings): Promise<void> {
   const db = await getDB();
-  await db.put('settings', settings, 'main');
+  await db.put('settings', settings, SETTINGS_KEY);
 }
+
+// ── Playback ─────────────────────────────────────────────────────────────────
 
 export async function getPlaybackState(fileId: string): Promise<PlaybackState | undefined> {
   const db = await getDB();
-  return db.get('playback', fileId) as Promise<PlaybackState | undefined>;
+  return db.get('playback', fileId);
 }
 
 export async function savePlaybackState(state: PlaybackState): Promise<void> {
@@ -105,12 +85,14 @@ export async function deletePlaybackState(fileId: string): Promise<void> {
 
 export async function getAllPlaybackStates(): Promise<PlaybackState[]> {
   const db = await getDB();
-  return db.getAll('playback') as Promise<PlaybackState[]>;
+  return db.getAll('playback');
 }
+
+// ── Offline queue ────────────────────────────────────────────────────────────
 
 export async function getOfflineQueue(): Promise<OfflineAction[]> {
   const db = await getDB();
-  return db.getAllFromIndex('offlineQueue', 'by-created') as Promise<OfflineAction[]>;
+  return db.getAllFromIndex('offlineQueue', 'by-created');
 }
 
 export async function enqueueOfflineAction(action: OfflineAction): Promise<void> {
